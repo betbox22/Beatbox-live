@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BETBOX - ניטור הימורים</title>
+    <style>
+        body { 
+            font-family: Arial; 
+            direction: rtl; 
+            margin: 0; 
+            padding: 0; 
+            background-color: #f5f5f5;
+        }
+        header { 
+            background-color: #2a3990; 
+            color: white; 
+            padding: 1rem; 
+            text-align: center;
+        }
+        .container { 
+            max-width: 1200px; 
+            margin: 0 auto; 
+            padding: 1rem; 
+        }
+        .card {
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+        table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            margin-top: 1rem;
+        }
+        th, td { 
+            padding: 0.75rem; 
+            border-bottom: 1px solid #eee; 
+            text-align: right; 
+        }
+        th {
+            background-color: #f8f9fa;
+            font-weight: bold;
+        }
+        .green { 
+            background-color: #e8f5e9; 
+            border-right: 4px solid #4caf50; 
+        }
+        .blue { 
+            background-color: #e3f2fd; 
+            border-right: 4px solid #2196f3; 
+        }
+        .game-time {
+            color: red;
+            font-weight: bold;
+        }
+        .button {
+            background-color: #2a3990;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .button:hover {
+            background-color: #1a2980;
+        }
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+        }
+        .filters {
+            display: flex;
+            gap: 1rem;
+        }
+        select {
+            padding: 0.5rem;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
+        .legend {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 3px;
+        }
+        .legend-green {
+            background-color: #4caf50;
+        }
+        .legend-blue {
+            background-color: #2196f3;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>BETBOX</h1>
+        <div id="current-date"></div>
+    </header>
+    
+    <div class="container">
+        <div class="card">
+            <div class="controls">
+                <div class="filters">
+                    <select id="sport-filter">
+                        <option value="all">כל הספורט</option>
+                        <option value="basketball">כדורסל</option>
+                        <option value="football">כדורגל</option>
+                    </select>
+                    <select id="opportunity-filter">
+                        <option value="all">כל ההזדמנויות</option>
+                        <option value="green">ירוק - ביטחון גבוה</option>
+                        <option value="blue">כחול - הזדמנות מצבית</option>
+                    </select>
+                </div>
+                <button class="button" id="refresh-button">רענן נתונים</button>
+            </div>
+            
+            <div id="status">טוען משחקים מדומים לצורך הדגמה...</div>
+            
+            <table id="games-table">
+                <thead>
+                    <tr>
+                        <th>ספורט</th>
+                        <th>ליגה</th>
+                        <th>משחק</th>
+                        <th>זמן</th>
+                        <th>תוצאה</th>
+                        <th>ליין פתיחה</th>
+                        <th>ליין נוכחי</th>
+                        <th>שינוי</th>
+                        <th>הזדמנות</th>
+                    </tr>
+                </thead>
+                <tbody id="games-tbody"></tbody>
+            </table>
+            
+            <div class="legend">
+                <div class="legend-item">
+                    <div class="legend-color legend-green"></div>
+                    <div>ירוק - הזדמנות בטוחה (שינוי ליין משמעותי)</div>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color legend-blue"></div>
+                    <div>כחול - הזדמנות מצבית (נתון חריג)</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>סטטיסטיקה</h2>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">
+                <div style="text-align: center;">
+                    <div style="font-size: 24px; font-weight: bold; color: #2a3990;" id="total-games">0</div>
+                    <div>משחקים חיים</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-size: 24px; font-weight: bold; color: #4caf50;" id="green-opportunities">0</div>
+                    <div>הזדמנויות ירוקות</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-size: 24px; font-weight: bold; color: #2196f3;" id="blue-opportunities">0</div>
+                    <div>הזדמנויות כחולות</div>
+                </div>
+                <div style="text-align: center;">
+                    <div style="font-size: 24px; font-weight: bold; color: #ff9800;" id="opportunity-percentage">0%</div>
+                    <div>אחוז הזדמנויות</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // עדכון התאריך הנוכחי
+        function updateCurrentDate() {
+            const now = new Date();
+            const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+            document.getElementById('current-date').textContent = now.toLocaleDateString('he-IL', options);
+        }
+        
+        // נתונים מדומים - במציאות היו מגיעים מהשרת
+        function getDemoGames() {
+            return [
+                {
+                    id: '1',
+                    sportType: 'כדורסל',
+                    league: 'ליגת העל הישראלית',
+                    matchup: 'הפועל תל אביב vs מכבי תל אביב',
+                    time: 'רבע 3 (4:25)',
+                    score: '68-72',
+                    openingLine: 'מכבי -6.5, O/U 160',
+                    currentLine: 'הפועל +2.5, O/U 175',
+                    difference: '<span style="color: green">+9.0</span>, <span style="color: green">+15.0</span>',
+                    opportunity: 'האנדרדוג מוביל במשחק',
+                    opportunityType: 'green'
+                },
+                {
+                    id: '2',
+                    sportType: 'כדורסל',
+                    league: 'יורוליג',
+                    matchup: 'ריאל מדריד vs ברצלונה',
+                    time: 'רבע 2 (7:15)',
+                    score: '45-38',
+                    openingLine: 'ריאל -2.5, O/U 155',
+                    currentLine: 'ריאל -5.5, O/U 165',
+                    difference: '<span style="color: red">-3.0</span>, <span style="color: green">+10.0</span>',
+                    opportunity: 'קצב נקודות גבוה מהצפוי',
+                    opportunityType: 'blue'
+                },
+                {
+                    id: '3',
+                    sportType: 'כדורגל',
+                    league: 'פרמייר ליג',
+                    matchup: 'מנצ׳סטר סיטי vs ליברפול',
+                    time: 'דקה 65',
+                    score: '2-1',
+                    openingLine: 'מנצ׳סטר 1.90, תיקו 3.50, ליברפול 4.00',
+                    currentLine: 'מנצ׳סטר 1.30, תיקו 4.50, ליברפול 10.00',
+                    difference: '<span style="color: green">+0.60</span>',
+                    opportunity: 'המועדפת מובילה ושולטת במשחק',
+                    opportunityType: 'green'
+                },
+                {
+                    id: '4',
+                    sportType: 'כדורגל',
+                    league: 'ליגת האלופות',
+                    matchup: 'פריז סן ז׳רמן vs באיירן מינכן',
+                    time: 'דקה 30',
+                    score: '0-0',
+                    openingLine: 'פריז 2.10, תיקו 3.30, באיירן 3.50',
+                    currentLine: 'פריז 2.20, תיקו 3.00, באיירן 3.60',
+                    difference: '<span style="color: red">-0.10</span>',
+                    opportunity: '',
+                    opportunityType: 'neutral'
+                },
+                {
+                    id: '5',
+                    sportType: 'כדורסל',
+                    league: 'NBA',
+                    matchup: 'לייקרס vs סלטיקס',
+                    time: 'רבע 4 (2:42)',
+                    score: '95-102',
+                    openingLine: 'לייקרס -1.5, O/U 220',
+                    currentLine: 'סלטיקס -3.5, O/U 205',
+                    difference: '<span style="color: green">+5.0</span>, <span style="color: red">-15.0</span>',
+                    opportunity: 'האנדרדוג מוביל בהפרש משמעותי',
+                    opportunityType: 'green'
+                }
+            ];
+        }
+        
+        // פונקציה להצגת המשחקים בטבלה
+        function displayGames(games) {
+            const tbody = document.getElementById('games-tbody');
+            tbody.innerHTML = '';
+            
+            // עדכון סטטיסטיקה
+            const totalGames = games.length;
+            const greenOpportunities = games.filter(g => g.opportunityType === 'green').length;
+            const blueOpportunities = games.filter(g => g.opportunityType === 'blue').length;
+            const opportunityPercentage = totalGames > 0 ? 
+                Math.round(((greenOpportunities + blueOpportunities) / totalGames) * 100) : 0;
+            
+            document.getElementById('total-games').textContent = totalGames;
+            document.getElementById('green-opportunities').textContent = greenOpportunities;
+            document.getElementById('blue-opportunities').textContent = blueOpportunities;
+            document.getElementById('opportunity-percentage').textContent = opportunityPercentage + '%';
+            
+            document.getElementById('status').textContent = 
+                games.length ? `נמצאו ${games.length} משחקים` : 'לא נמצאו משחקים';
+            
+            // הוספת שורות לטבלה
+            games.forEach(game => {
+                const row = document.createElement('tr');
+                if (game.opportunityType === 'green') {
+                    row.className = 'green';
+                } else if (game.opportunityType === 'blue') {
+                    row.className = 'blue';
+                }
+                
+                row.innerHTML = `
+                    <td>${game.sportType}</td>
+                    <td>${game.league}</td>
+                    <td>${game.matchup}</td>
+                    <td class="game-time">${game.time}</td>
+                    <td>${game.score}</td>
+                    <td>${game.openingLine}</td>
+                    <td>${game.currentLine}</td>
+                    <td>${game.difference}</td>
+                    <td>${game.opportunity || '-'}</td>
+                `;
+                
+                tbody.appendChild(row);
+            });
+        }
+        
+        // פונקציה לסינון המשחקים
+        function filterGames() {
+            const sportFilter = document.getElementById('sport-filter').value;
+            const opportunityFilter = document.getElementById('opportunity-filter').value;
+            
+            let filteredGames = getDemoGames();
+            
+            if (sportFilter !== 'all') {
+                const sportType = sportFilter === 'basketball' ? 'כדורסל' : 'כדורגל';
+                filteredGames = filteredGames.filter(game => game.sportType === sportType);
+            }
+            
+            if (opportunityFilter !== 'all') {
+                filteredGames = filteredGames.filter(game => game.opportunityType === opportunityFilter);
+            }
+            
+            displayGames(filteredGames);
+        }
+        
+        // אתחול הדף
+        document.addEventListener('DOMContentLoaded', function() {
+            updateCurrentDate();
+            
+            // הצגת משחקים
+            displayGames(getDemoGames());
+            
+            // אירועי סינון
+            document.getElementById('sport-filter').addEventListener('change', filterGames);
+            document.getElementById('opportunity-filter').addEventListener('change', filterGames);
+            
+            // רענון נתונים
+            document.getElementById('refresh-button').addEventListener('click', function() {
+                this.textContent = 'מרענן...';
+                setTimeout(() => {
+                    displayGames(getDemoGames());
+                    this.textContent = 'רענן נתונים';
+                }, 1000);
+            });
+        });
+    </script>
+</body>
+</html>
