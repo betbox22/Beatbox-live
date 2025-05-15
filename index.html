@@ -1,11 +1,559 @@
-function fetchGames() {
-    fetch('/api/live-games')
-        .then(response => response.json())
-        .then(games => {
-            displayGames(games);
-        })
-        .catch(error => {
-            console.error('Error fetching games:', error);
-            document.getElementById('status').textContent = 'שגיאה בטעינת משחקים';
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BETBOX - מערכת לזיהוי הזדמנויות הימורים</title>
+    <style>
+        :root {
+            --primary: #2a3990;
+            --secondary: #25b578;
+            --warning: #ff9800;
+            --danger: #f44336;
+            --light: #f5f5f5;
+            --dark: #212121;
+            --gray: #757575;
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', 'Arial', sans-serif;
+        }
+        
+        body {
+            background-color: #f0f2f5;
+            direction: rtl;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 1rem;
+        }
+        
+        header {
+            background-color: var(--primary);
+            color: white;
+            padding: 1rem 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .logo {
+            font-size: 24px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+        }
+        
+        .logo span {
+            color: var(--secondary);
+        }
+        
+        .logo-icon {
+            margin-left: 10px;
+            font-size: 28px;
+        }
+        
+        .filters {
+            background-color: white;
+            padding: 1rem;
+            border-radius: 8px;
+            margin: 1rem 0;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+        
+        .filter-group {
+            flex: 1;
+            min-width: 200px;
+        }
+        
+        .filter-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: var(--dark);
+        }
+        
+        .filter-group select, .filter-group input {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+        
+        .game-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        
+        .stat-card {
+            background-color: white;
+            border-radius: 8px;
+            padding: 1rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        
+        .stat-number {
+            font-size: 24px;
+            font-weight: bold;
+            color: var(--primary);
+            margin-bottom: 0.5rem;
+        }
+        
+        .stat-title {
+            font-size: 0.9rem;
+            color: var(--gray);
+        }
+        
+        .games-table {
+            width: 100%;
+            background-color: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        
+        thead {
+            background-color: #f8f9fa;
+        }
+        
+        th {
+            text-align: right;
+            padding: 1rem;
+            font-weight: 600;
+            color: var(--gray);
+            border-bottom: 1px solid #eee;
+        }
+        
+        td {
+            padding: 1rem;
+            border-bottom: 1px solid #eee;
+            font-size: 0.9rem;
+        }
+        
+        .cell-centered {
+            text-align: center;
+        }
+        
+        .game-row {
+            transition: background-color 0.2s;
+        }
+        
+        .game-row:hover {
+            background-color: #f8f9fa;
+        }
+        
+        .game-row.green {
+            background-color: #e8f5e9;
+            border-right: 4px solid #4caf50;
+        }
+        
+        .game-row.blue {
+            background-color: #e3f2fd;
+            border-right: 4px solid #2196f3;
+        }
+        
+        .opportunity-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .indicator-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: #ddd;
+        }
+        
+        .indicator-dot.green {
+            background-color: #4caf50;
+        }
+        
+        .indicator-dot.blue {
+            background-color: #2196f3;
+        }
+        
+        .difference-positive {
+            color: #4caf50;
+        }
+        
+        .difference-negative {
+            color: #f44336;
+        }
+        
+        .game-time-live {
+            color: #f44336;
+            font-weight: 500;
+        }
+        
+        .refresh-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            color: var(--gray);
+        }
+        
+        .auto-refresh {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .legend {
+            margin-top: 1rem;
+            padding: 1rem;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .legend-title {
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+        
+        .legend-items {
+            display: flex;
+            gap: 1.5rem;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 4px;
+        }
+        
+        .legend-color.green {
+            background-color: #4caf50;
+        }
+        
+        .legend-color.blue {
+            background-color: #2196f3;
+        }
+        
+        @media (max-width: 768px) {
+            .filters, .legend-items {
+                flex-direction: column;
+            }
+            
+            .stat-card {
+                min-width: 100%;
+            }
+            
+            .games-table {
+                overflow-x: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container header-content">
+            <div class="logo">
+                <div class="logo-icon">📊</div>
+                BET<span>BOX</span>
+            </div>
+            <div id="current-date"></div>
+        </div>
+    </header>
+    
+    <div class="container">
+        <div class="filters">
+            <div class="filter-group">
+                <label for="sport-filter">ספורט</label>
+                <select id="sport-filter">
+                    <option value="all">הכל</option>
+                    <option value="18">כדורסל</option>
+                    <option value="1">כדורגל</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label for="league-filter">ליגה</label>
+                <select id="league-filter">
+                    <option value="all">הכל</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label for="opportunity-filter">הזדמנויות</label>
+                <select id="opportunity-filter">
+                    <option value="all">הכל</option>
+                    <option value="green">ירוק - ביטחון גבוה</option>
+                    <option value="blue">כחול - מצבי</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label for="line-movement">תנועת ליין (מינימום)</label>
+                <input type="number" id="line-movement" value="0" min="0" step="0.5">
+            </div>
+        </div>
+        
+        <div class="game-stats">
+            <div class="stat-card">
+                <div class="stat-number" id="total-games">0</div>
+                <div class="stat-title">משחקים חיים</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="green-opportunities">0</div>
+                <div class="stat-title">הזדמנויות ירוקות</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="blue-opportunities">0</div>
+                <div class="stat-title">הזדמנויות כחולות</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="opportunities-percent">0%</div>
+                <div class="stat-title">אחוז הזדמנויות</div>
+            </div>
+        </div>
+        
+        <div class="refresh-info">
+            <div class="last-update" id="last-update">עדכון אחרון: -</div>
+            <div class="auto-refresh">
+                <label for="auto-refresh">רענון אוטומטי:</label>
+                <select id="auto-refresh">
+                    <option value="5">כל 5 שניות</option>
+                    <option value="10">כל 10 שניות</option>
+                    <option value="30" selected>כל 30 שניות</option>
+                    <option value="60">כל דקה</option>
+                </select>
+            </div>
+        </div>
+        
+        <div class="games-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>ספורט</th>
+                        <th>ליגה</th>
+                        <th>משחק</th>
+                        <th>זמן</th>
+                        <th>תוצאה</th>
+                        <th>ליין פתיחה</th>
+                        <th>ליין התחלה</th>
+                        <th>ליין נוכחי</th>
+                        <th>שינוי</th>
+                        <th>הזדמנות</th>
+                    </tr>
+                </thead>
+                <tbody id="games-tbody">
+                    <!-- שורות הטבלה ימולאו ע"י JavaScript -->
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="legend">
+            <div class="legend-title">מקרא הזדמנויות:</div>
+            <div class="legend-items">
+                <div class="legend-item">
+                    <div class="legend-color green"></div>
+                    <div>ירוק - הזדמנות בטוחה (שינוי ליין משמעותי מתואם עם מגמה)</div>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color blue"></div>
+                    <div>כחול - הזדמנות מצבית (נתון חריג זוהה)</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // עדכון התאריך הנוכחי
+            const today = new Date();
+            const formattedDate = `${today.getDate().toString().padStart(2, '0')}/${(today.getMonth() + 1).toString().padStart(2, '0')}/${today.getFullYear()}`;
+            document.getElementById('current-date').textContent = formattedDate;
+            
+            // הגדרת רענון אוטומטי
+            const autoRefreshSelect = document.getElementById('auto-refresh');
+            let refreshInterval;
+            
+            function setAutoRefresh() {
+                clearInterval(refreshInterval);
+                const seconds = parseInt(autoRefreshSelect.value);
+                refreshInterval = setInterval(fetchGames, seconds * 1000);
+            }
+            
+            autoRefreshSelect.addEventListener('change', setAutoRefresh);
+            
+            // הגדרת מסננים
+            const sportFilter = document.getElementById('sport-filter');
+            const leagueFilter = document.getElementById('league-filter');
+            const opportunityFilter = document.getElementById('opportunity-filter');
+            const lineMovementFilter = document.getElementById('line-movement');
+            
+            sportFilter.addEventListener('change', applyFilters);
+            leagueFilter.addEventListener('change', applyFilters);
+            opportunityFilter.addEventListener('change', applyFilters);
+            lineMovementFilter.addEventListener('change', applyFilters);
+            
+            // משתנים גלובליים
+            let allGames = [];
+            
+            // פונקציה לקבלת הנתונים מה-API
+            function fetchGames() {
+                // קבל את ערך מסנן הספורט
+                const selectedSport = sportFilter.value;
+                
+                fetch(`/api/live-games?sport_id=${selectedSport}`)
+                    .then(response => response.json())
+                    .then(games => {
+                        allGames = games;
+                        applyFilters();
+                        updateLastUpdateTime();
+                    })
+                    .catch(error => {
+                        console.error('Error fetching games:', error);
+                        document.getElementById('status').textContent = 'שגיאה בטעינת משחקים';
+                    });
+            }
+            
+            // פונקציה לסינון המשחקים
+            function applyFilters() {
+                const selectedSport = sportFilter.value;
+                const selectedLeague = leagueFilter.value;
+                const selectedOpportunity = opportunityFilter.value;
+                const minLineMovement = parseFloat(lineMovementFilter.value) || 0;
+                
+                let filteredGames = [...allGames];
+                
+                // סינון לפי ספורט (לא צריך כי כבר סיננו בקריאה ל-API)
+                
+                // סינון לפי ליגה
+                if (selectedLeague !== 'all') {
+                    filteredGames = filteredGames.filter(game => game.league === selectedLeague);
+                }
+                
+                // סינון לפי סוג הזדמנות
+                if (selectedOpportunity !== 'all') {
+                    filteredGames = filteredGames.filter(game => game.opportunityType === selectedOpportunity);
+                }
+                
+                // עדכון הטבלה
+                displayGames(filteredGames);
+                
+                // עדכון רשימת הליגות במסנן
+                updateLeagueFilter();
+            }
+            
+            // פונקציה לעדכון מסנן הליגות
+            function updateLeagueFilter() {
+                const leagues = new Set();
+                
+                // הוסף את כל הליגות הזמינות
+                allGames.forEach(game => leagues.add(game.league));
+                
+                // שמור את הבחירה הנוכחית
+                const currentSelection = leagueFilter.value;
+                
+                // נקה את הרשימה הנוכחית
+                leagueFilter.innerHTML = '<option value="all">הכל</option>';
+                
+                // מלא את הרשימה עם כל הליגות
+                leagues.forEach(league => {
+                    const option = document.createElement('option');
+                    option.value = league;
+                    option.textContent = league;
+                    leagueFilter.appendChild(option);
+                });
+                
+                // החזר את הבחירה הקודמת אם היא עדיין קיימת
+                if (Array.from(leagues).includes(currentSelection)) {
+                    leagueFilter.value = currentSelection;
+                }
+            }
+            
+            // פונקציה לעדכון טבלת המשחקים
+            function displayGames(games) {
+                const tbody = document.getElementById('games-tbody');
+                tbody.innerHTML = ''; // נקה את הטבלה
+                
+                // עדכון הסטטיסטיקה
+                const totalGames = games.length;
+                const greenOpportunities = games.filter(g => g.opportunityType === 'green').length;
+                const blueOpportunities = games.filter(g => g.opportunityType === 'blue').length;
+                const opportunityPercentage = totalGames > 0 ? 
+                    Math.round(((greenOpportunities + blueOpportunities) / totalGames) * 100) : 0;
+                
+                document.getElementById('total-games').textContent = totalGames;
+                document.getElementById('green-opportunities').textContent = greenOpportunities;
+                document.getElementById('blue-opportunities').textContent = blueOpportunities;
+                document.getElementById('opportunities-percent').textContent = opportunityPercentage + '%';
+                
+                // מלא את הטבלה עם הנתונים החדשים
+                games.forEach(game => {
+                    const row = document.createElement('tr');
+                    row.className = 'game-row';
+                    
+                    if (game.opportunityType === 'green') {
+                        row.classList.add('green');
+                    } else if (game.opportunityType === 'blue') {
+                        row.classList.add('blue');
+                    }
+                    
+                    row.innerHTML = `
+                        <td>${game.sportType}</td>
+                        <td>${game.league}</td>
+                        <td>${game.matchup}</td>
+                        <td class="game-time-live">${game.time}</td>
+                        <td class="cell-centered">${game.score}</td>
+                        <td>${game.openingLine}</td>
+                        <td>${game.startingLine || "-"}</td>
+                        <td>${game.currentLine}</td>
+                        <td>${game.difference}</td>
+                        <td>
+                            ${game.opportunity ? `
+                                <div class="opportunity-indicator">
+                                    <div class="indicator-dot ${game.opportunityType}"></div>
+                                    ${game.opportunity}
+                                </div>
+                            ` : '-'}
+                        </td>
+                    `;
+                    
+                    tbody.appendChild(row);
+                });
+            }
+            
+            // פונקציה לעדכון זמן הרענון האחרון
+            function updateLastUpdateTime() {
+                const now = new Date();
+                const formattedTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
+                document.getElementById('last-update').textContent = `עדכון אחרון: ${formattedDate} ${formattedTime}`;
+            }
+            
+            // הפעל רענון ראשוני
+            fetchGames();
+            setAutoRefresh();
         });
-}
+    </script>
+</body>
+</html>
