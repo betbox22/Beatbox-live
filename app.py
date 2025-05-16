@@ -1,666 +1,467 @@
-from flask import Flask, jsonify, request, send_from_directory
-import requests
-import os
-import json
-import time
-from datetime import datetime, timedelta
-import threading
-import logging
-
-# הגדרת לוגים
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.FileHandler("betbox.log"), logging.StreamHandler()]
-)
-logger = logging.getLogger("betbox")
-
-app = Flask(__name__, static_folder='static')
-
-# קונפיגורציה
-API_TOKEN = os.environ.get('API_TOKEN', '219761-iALwqep7Hy1aCl')
-API_BASE_URL = "https://api.b365api.com/v3"
-DATA_DIR = "data"
-os.makedirs(DATA_DIR, exist_ok=True)
-
-# מאגרי נתונים זמניים
-games_data = {}          # מידע כללי על משחקים
-opening_lines = {}       # ליין פתיחה ראשוני
-current_lines = {}       # ליין נוכחי לפני המשחק
-starting_lines = {}      # ליין בזמן תחילת המשחק (נעול)
-live_lines = {}          # ליין בזמן אמת
-score_history = {}       # היסטוריית תוצאות לחישוב קצב משחק
-
-# מנעול למניעת התנגשויות
-data_lock = threading.Lock()
-
-# פונקציות עזר לשמירה וטעינה
-def save_data(data, filename):
-    """שמירת נתונים לקובץ JSON"""
-    filepath = os.path.join(DATA_DIR, filename)
-    with open(filepath, 'w') as f:
-        json.dump(data, f)
-
-def load_data(filename):
-    """טעינת נתונים מקובץ JSON"""
-    filepath = os.path.join(DATA_DIR, filename)
-    try:
-        with open(filepath, 'r') as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-# טעינת נתונים קיימים בעת הפעלת השרת
-def load_all_data():
-    global games_data, opening_lines, current_lines, starting_lines, live_lines, score_history
-    games_data = load_data('games_data.json')
-    opening_lines = load_data('opening_lines.json')
-    current_lines = load_data('current_lines.json')
-    starting_lines = load_data('starting_lines.json')
-    live_lines = load_data('live_lines.json')
-    score_history = load_data('score_history.json')
-
-# שמירת כל הנתונים
-def save_all_data():
-    save_data(games_data, 'games_data.json')
-    save_data(opening_lines, 'opening_lines.json')
-    save_data(current_lines, 'current_lines.json')
-    save_data(starting_lines, 'starting_lines.json')
-    save_data(live_lines, 'live_lines.json')
-    save_data(score_history, 'score_history.json')
-
-# פונקציות לאיסוף נתונים
-def fetch_upcoming_games():
-    """מביא משחקים קרובים מה-API"""
-    try:
-        url = f"{API_BASE_URL}/events/upcoming"
-        params = {"token": API_TOKEN, "sport_id": "3"}  # 3 = כדורסל
-        response = requests.get(url, params=params)
-        return response.json().get('results', [])
-    except Exception as e:
-        logger.error(f"Error fetching upcoming games: {str(e)}")
-        return []
-
-def fetch_inplay_games():
-    """מביא משחקים חיים מה-API"""
-    try:
-        url = f"{API_BASE_URL}/events/inplay"
-        params = {"token": API_TOKEN, "sport_id": "3"}  # 3 = כדורסל
-        response = requests.get(url, params=params)
-        return response.json().get('results', [])
-    except Exception as e:
-        logger.error(f"Error fetching inplay games: {str(e)}")
-        return []
-
-def fetch_odds(game_id):
-    """מביא יחסי הימור עבור משחק"""
-    try:
-        # במקום הקוד הקיים, השתמש בקוד הבא שמחזיר נתונים מגוונים יותר
-        import random
-        import hashlib
-        
-        # צור ערכים אקראיים שונים לכל משחק
-        # השתמש ב-game_id כסיד לאקראיות כדי שכל משחק יקבל ערכים שונים
-        seed_str = f"{game_id}-{datetime.now().day}"
-        seed = int(hashlib.md5(seed_str.encode()).hexdigest(), 16) % 10000
-        random.seed(seed)
-        
-        # יצירת ערכים בסיסיים מגוונים
-        base_spread = -5 + random.uniform(-8, 8)
-        base_total = 180 + random.uniform(-30, 50)
-        
-        # הוסף שינוי קטן לדמות שינויים בליין
-        spread = base_spread + random.uniform(-3, 3)
-        total = base_total + random.uniform(-10, 10)
-        
-        return {
-            'spread': round(spread, 1),
-            'total': round(total, 1)
-        }
-    except Exception as e:
-        logger.error(f"Error fetching odds for game {game_id}: {str(e)}")
-        return {}
-
-# פונקציות עדכון
-def daily_games_scan():
-    """סורק משחקים חדשים פעם ביום"""
-    logger.info("Performing daily games scan...")
-    games = fetch_upcoming_games()
-    
-    with data_lock:
-        for game in games:
-            game_id = game.get('id')
-            
-            # אם המשחק חדש, הוסף אותו
-            if game_id not in games_data:
-                games_data[game_id] = {
-                    'id': game_id,
-                    'sport_id': game.get('sport_id'),
-                    'league': game.get('league', {}).get('name', ''),
-                    'home': game.get('home', {}).get('name', ''),
-                    'away': game.get('away', {}).get('name', ''),
-                    'time': game.get('time'),
-                    'status': 'upcoming'
-                }
-                
-                # שמור את ליין הפתיחה
-                odds = fetch_odds(game_id)
-                opening_lines[game_id] = odds
-                current_lines[game_id] = odds.copy()
-                
-        save_all_data()
-
-def update_pregame_lines():
-    """מעדכן ליינים של משחקים לפני תחילתם"""
-    logger.info("Updating pregame lines...")
-    
-    with data_lock:
-        for game_id, game in list(games_data.items()):
-            if game['status'] == 'upcoming':
-                new_odds = fetch_odds(game_id)
-                current_lines[game_id] = new_odds
-        
-        save_data(current_lines, 'current_lines.json')
-
-def monitor_live_games():
-    """מנטר משחקים חיים"""
-    logger.info("Monitoring live games...")
-    live_games = fetch_inplay_games()
-    current_time = datetime.now()
-    
-    with data_lock:
-        for game in live_games:
-            game_id = game.get('id')
-            
-            # אם המשחק קיים
-            if game_id in games_data:
-                # אם המשחק הפך עכשיו לחי, נעל את ליין ההתחלה
-                if games_data[game_id]['status'] != 'live':
-                    games_data[game_id]['status'] = 'live'
-                    starting_lines[game_id] = current_lines.get(game_id, {}).copy()
-                
-                # עדכון מידע בסיסי
-                current_score = game.get('ss', '0-0')
-                games_data[game_id]['score'] = current_score
-                games_data[game_id]['timer'] = game.get('timer', {})
-                
-                # עדכון ליין לייב
-                live_odds = fetch_odds(game_id)
-                live_lines[game_id] = live_odds
-                
-                # שמירת היסטוריית תוצאות לחישוב קצב
-                if game_id not in score_history:
-                    score_history[game_id] = []
-                
-                score_history[game_id].append({
-                    'score': current_score,
-                    'timestamp': current_time.isoformat()
-                })
-                
-                # שמירה רק של 10 דקות אחרונות
-                cutoff_time = (current_time - timedelta(minutes=10)).isoformat()
-                score_history[game_id] = [
-                    record for record in score_history[game_id]
-                    if record['timestamp'] >= cutoff_time
-                ]
-        
-        save_data(games_data, 'games_data.json')
-        save_data(starting_lines, 'starting_lines.json')
-        save_data(live_lines, 'live_lines.json')
-        save_data(score_history, 'score_history.json')
-
-def calculate_shot_rate(game_id):
-    """מחשב את קצב הזריקות לסל (זריקות לדקה)"""
-    if game_id not in score_history or len(score_history[game_id]) < 2:
-        return None
-    
-    # מיון לפי זמן
-    history = sorted(score_history[game_id], key=lambda x: x['timestamp'])
-    
-    # חישוב זמן בדקות
-    start_time = datetime.fromisoformat(history[0]['timestamp'])
-    end_time = datetime.fromisoformat(history[-1]['timestamp'])
-    minutes_elapsed = (end_time - start_time).total_seconds() / 60
-    
-    if minutes_elapsed < 1:  # נדרש לפחות דקה של נתונים
-        return None
-    
-    # חישוב סך נקודות שנוספו
-    try:
-        start_score = history[0]['score']
-        end_score = history[-1]['score']
-        
-        start_home, start_away = map(int, start_score.split('-'))
-        end_home, end_away = map(int, end_score.split('-'))
-        
-        total_points_added = (end_home + end_away) - (start_home + start_away)
-        
-        # חישוב נקודות לדקה
-        points_per_minute = total_points_added / minutes_elapsed
-        
-        # המרה לזריקות משוערות (בהנחה של 2 נקודות לזריקה בממוצע)
-        shots_per_minute = points_per_minute / 2
-        
-        return shots_per_minute
-    except (ValueError, ZeroDivisionError):
-        return None
-
-def determine_shot_rate_color(shot_rate):
-    """קובע צבע לפי קצב זריקות"""
-    if shot_rate is None:
-        return None
-    
-    if shot_rate <= 3.0:
-        return "red"  # קצב איטי
-    elif shot_rate <= 4.0:
-        return None  # קצב רגיל, ללא סימון
-    else:
-        return "blue"  # קצב מהיר
-
-def detect_opportunities(game_id):
-    """מזהה הזדמנויות בהימורים לפי הלוגיקה החדשה"""
-    result = {
-        "opening_vs_start": None,
-        "spread_flag": None,
-        "ou_flag": None,
-        "shot_rate": None,
-        "shot_rate_color": None,
-        "type": "neutral",
-        "reason": ""
-    }
-    
-    if game_id not in games_data:
-        return result
-    
-    game = games_data[game_id]
-    opening = opening_lines.get(game_id, {})
-    current = current_lines.get(game_id, {})
-    start = starting_lines.get(game_id, {})
-    live = live_lines.get(game_id, {})
-    
-    # 1. השוואת נתוני פתיחה מול נתוני תחילת משחק
-    if opening and start:
-        opening_spread = opening.get('spread', 0)
-        opening_total = opening.get('total', 0)
-        start_spread = start.get('spread', 0)
-        start_total = start.get('total', 0)
-        
-        # הבדל של לפחות 2 נקודות בשניהם
-        if abs(start_spread - opening_spread) >= 2 and abs(start_total - opening_total) >= 2:
-            # קביעה אם חיובי או שלילי
-            is_positive = ((start_spread > opening_spread) and (start_total > opening_total)) or \
-                         ((start_spread < opening_spread) and (start_total < opening_total))
-            
-            result["opening_vs_start"] = "green" if is_positive else "red"
-            if is_positive:
-                result["type"] = "green"
-                result["reason"] = "הבדל חיובי בין פתיחה להתחלה"
-            else:
-                result["type"] = "red"
-                result["reason"] = "הבדל שלילי בין פתיחה להתחלה"
-    
-    # 2. זיהוי שינויים במשחק חי
-    if game['status'] == 'live' and start and live:
-        start_spread = start.get('spread', 0)
-        start_total = start.get('total', 0)
-        live_spread = live.get('spread', 0)
-        live_total = live.get('total', 0)
-        
-        # שינוי של 7+ נקודות בליין
-        if abs(live_spread - start_spread) >= 7:
-            result["spread_flag"] = "green"
-            result["type"] = "green"
-            result["reason"] = "שינוי משמעותי בליין במהלך המשחק"
-        
-        # שינוי של 10+ נקודות באובר אנדר
-        if abs(live_total - start_total) >= 10:
-            result["ou_flag"] = "green"
-            result["type"] = "green"
-            result["reason"] = "שינוי משמעותי באובר/אנדר במהלך המשחק"
-    
-    # 3. ניתוח קצב משחק
-    shot_rate = calculate_shot_rate(game_id)
-    shot_rate_color = determine_shot_rate_color(shot_rate)
-    
-    result["shot_rate"] = shot_rate
-    result["shot_rate_color"] = shot_rate_color
-    
-    # אם לא נקבע סוג לפי הסעיפים הקודמים, קבע לפי קצב זריקות
-    if result["type"] == "neutral" and shot_rate_color:
-        result["type"] = shot_rate_color
-        if shot_rate_color == "red":
-            result["reason"] = "קצב משחק איטי"
-        elif shot_rate_color == "blue":
-            result["reason"] = "קצב משחק מהיר"
-    
-    return result
-
-# תהליכי רקע
-def start_background_tasks():
-    # הפעל את הסריקה היומית
-    daily_thread = threading.Thread(target=run_daily_scan)
-    daily_thread.daemon = True
-    daily_thread.start()
-    
-    # הפעל עדכוני ליינים לפני משחק
-    pregame_thread = threading.Thread(target=run_pregame_updates)
-    pregame_thread.daemon = True
-    pregame_thread.start()
-    
-    # הפעל ניטור משחקים חיים
-    live_thread = threading.Thread(target=run_live_monitoring)
-    live_thread.daemon = True
-    live_thread.start()
-
-def run_daily_scan():
-    """סריקה יומית בלופ"""
-    while True:
-        daily_games_scan()
-        time.sleep(24 * 60 * 60)  # חכה 24 שעות
-
-def run_pregame_updates():
-    """עדכון ליינים לפני משחק בלופ"""
-    while True:
-        update_pregame_lines()
-        time.sleep(30 * 60)  # חכה 30 דקות
-
-def run_live_monitoring():
-    """ניטור משחקים חיים בלופ"""
-    while True:
-        monitor_live_games()
-        time.sleep(30)  # חכה 30 שניות
-
-# נתיבי API
-@app.route('/')
-def home():
-    """דף הבית"""
-    return send_from_directory('.', 'index.html')
-
-@app.route('/api/games')
-def get_games():
-    """מחזיר את כל המשחקים"""
-    # פילטרים אופציונליים
-    sport_id = request.args.get('sport_id', 'all')
-    status = request.args.get('status', 'all')
-    
-    result = []
-    
-    with data_lock:
-        for game_id, game in games_data.items():
-            # סינון לפי ספורט
-            if sport_id != 'all' and game['sport_id'] != sport_id:
-                continue
-                
-            # סינון לפי סטטוס
-            if status != 'all' and game['status'] != status:
-                continue
-            
-            # זיהוי הזדמנויות
-            opportunity = detect_opportunities(game_id)
-            
-            # חישוב שינויים
-            opening_spread = opening_lines.get(game_id, {}).get('spread')
-            current_spread = current_lines.get(game_id, {}).get('spread')
-            start_spread = starting_lines.get(game_id, {}).get('spread')
-            live_spread = live_lines.get(game_id, {}).get('spread')
-            
-            opening_total = opening_lines.get(game_id, {}).get('total')
-            current_total = current_lines.get(game_id, {}).get('total')
-            start_total = starting_lines.get(game_id, {}).get('total')
-            live_total = live_lines.get(game_id, {}).get('total')
-            
-            # בניית אובייקט המשחק לתצוגה
-            game_info = {
-                'id': game_id,
-                'sportType': 'כדורסל' if game['sport_id'] == '3' else 'כדורגל',
-                'league': game['league'],
-                'date': format_date(game.get('time')),
-                'time': format_time(game.get('time')),
-                'matchup': f"{game['home']} vs {game['away']}",
-                'status': game['status'],
-                'home': game['home'],
-                'away': game['away'],
-                
-                # ליינים שונים - פורמט והתאמה לעיצוב
-                'opening_spread': format_spread(opening_spread),
-                'opening_total': format_total(opening_total),
-                'current_spread': format_spread(current_spread),
-                'current_total': format_total(current_total),
-                'start_spread': format_spread(start_spread) if game['status'] == 'live' else '',
-                'start_total': format_total(start_total) if game['status'] == 'live' else '',
-                'live_spread': format_spread(live_spread) if game['status'] == 'live' else '',
-                'live_total': format_total(live_total) if game['status'] == 'live' else '',
-                
-                # שינויים בליין
-                'spread_diff': format_diff(current_spread, opening_spread) if opening_spread and current_spread else '',
-                'total_diff': format_diff(current_total, opening_total) if opening_total and current_total else '',
-                'live_spread_diff': format_diff(live_spread, start_spread) if start_spread and live_spread else '',
-                'live_total_diff': format_diff(live_total, start_total) if start_total and live_total else '',
-                
-                # מידע נוסף
-                'score': game.get('score', ''),
-                'timer': format_timer(game.get('timer', {})),
-                
-                # פרטי הזדמנות
-                'opportunity_type': opportunity['type'],
-                'opportunity_reason': opportunity['reason'],
-                'opening_vs_start': opportunity['opening_vs_start'],
-                'spread_flag': opportunity['spread_flag'],
-                'ou_flag': opportunity['ou_flag'],
-                'shot_rate': format_shot_rate(opportunity['shot_rate']),
-                'shot_rate_color': opportunity['shot_rate_color']
+<td>-</td>
+                    <td>${game.opening_spread || '-'}</td>
+                    <td>-</td>
+                    <td id="current-spread-${game.id}" class="${compareValues(game.current_spread, game.opening_spread)}">${game.current_spread || '-'}</td>
+                    <td>${game.opening_total || '-'}</td>
+                    <td>-</td>
+                    <td id="current-total-${game.id}" class="${compareValues(game.current_total, game.opening_total)}">${game.current_total || '-'}</td>
+                    <td>-</td>
+                    <td>-</td>
+                `;
             }
             
-            result.append(game_info)
-    
-    return jsonify(result)
-
-@app.route('/api/live-games')
-def get_live_games():
-    """מחזיר רק משחקים חיים"""
-    with data_lock:
-        live_result = []
+            return row;
+        }
         
-        for game_id, game in games_data.items():
-            if game['status'] == 'live':
-                # זיהוי הזדמנויות
-                opportunity = detect_opportunities(game_id)
+        // פונקציית עזר להשוואת ערכים
+        function compareValues(current, original) {
+            if (!current || !original) return "";
+            
+            const diff = parseFloat(current) - parseFloat(original);
+            if (Math.abs(diff) >= 2) {
+                return diff > 0 ? "cell-highlight-green" : "cell-highlight-red";
+            }
+            return "";
+        }
+        
+        // משיכת משחקים מהשרת
+        async function fetchGames() {
+            try {
+                // סינון
+                const sportFilter = document.getElementById('sport-filter').value;
+                const leagueFilter = document.getElementById('league-filter').value;
+                const opportunitiesFilter = document.getElementById('opportunities-filter').value;
+                const minLineMovement = document.getElementById('min-line-movement').value;
+                const statusFilter = document.getElementById('status-filter').value;
                 
-                # חישוב שינויים
-                opening_spread = opening_lines.get(game_id, {}).get('spread')
-                start_spread = starting_lines.get(game_id, {}).get('spread')
-                live_spread = live_lines.get(game_id, {}).get('spread')
+                // בניית URL עם פרמטרים
+                let url = '/api/games';
+                const params = new URLSearchParams();
                 
-                opening_total = opening_lines.get(game_id, {}).get('total')
-                start_total = starting_lines.get(game_id, {}).get('total')
-                live_total = live_lines.get(game_id, {}).get('total')
-                
-                # בניית אובייקט המשחק לתצוגה
-                game_info = {
-                    'id': game_id,
-                    'sportType': 'כדורסל' if game['sport_id'] == '3' else 'כדורגל',
-                    'league': game['league'],
-                    'home': game['home'],
-                    'away': game['away'],
-                    'matchup': f"{game['home']} vs {game['away']}",
-                    
-                    # ליינים שונים - פורמט והתאמה לעיצוב
-                    'opening_spread': format_spread(opening_spread),
-                    'opening_total': format_total(opening_total),
-                    'start_spread': format_spread(start_spread),
-                    'start_total': format_total(start_total),
-                    'live_spread': format_spread(live_spread),
-                    'live_total': format_total(live_total),
-                    
-                    # שינויים בליין
-                    'start_spread_diff': format_diff(start_spread, opening_spread) if opening_spread and start_spread else '',
-                    'start_total_diff': format_diff(start_total, opening_total) if opening_total and start_total else '',
-                    'live_spread_diff': format_diff(live_spread, start_spread) if start_spread and live_spread else '',
-                    'live_total_diff': format_diff(live_total, start_total) if start_total and live_total else '',
-                    
-                    # מידע נוסף
-                    'score': game.get('score', ''),
-                    'timer': format_timer(game.get('timer', {})),
-                    
-                    # פרטי הזדמנות
-                    'opportunity_type': opportunity['type'],
-                    'opportunity_reason': opportunity['reason'],
-                    'opening_vs_start': opportunity['opening_vs_start'],
-                    'spread_flag': opportunity['spread_flag'],
-                    'ou_flag': opportunity['ou_flag'],
-                    'shot_rate': format_shot_rate(opportunity['shot_rate']),
-                    'shot_rate_color': opportunity['shot_rate_color']
+                if (sportFilter !== 'all') {
+                    params.append('sport_type', sportFilter);
                 }
                 
-                live_result.append(game_info)
-    
-    return jsonify(live_result)
-
-@app.route('/api/game/<game_id>')
-def get_game(game_id):
-    """מחזיר מידע מפורט על משחק ספציפי"""
-    with data_lock:
-        if game_id not in games_data:
-            return jsonify({"error": "Game not found"}), 404
+                if (statusFilter !== 'all') {
+                    params.append('status', statusFilter);
+                }
+                
+                const response = await fetch(url + (params.toString() ? `?${params.toString()}` : ''));
+                const games = await response.json();
+                
+                // משיכת סטטיסטיקות
+                const statsResponse = await fetch('/api/stats');
+                const stats = await statsResponse.json();
+                
+                // עדכון ממשק משתמש
+                updateDashboard(stats);
+                updateGamesTable(games, { 
+                    leagueFilter, 
+                    opportunitiesFilter, 
+                    minLineMovement: parseFloat(minLineMovement),
+                    statusFilter
+                });
+                updateLastRefreshTime();
+            } catch (error) {
+                console.error('Error fetching games:', error);
+            }
+        }
         
-        game = games_data[game_id]
-        opportunity = detect_opportunities(game_id)
+        // עדכון טבלת המשחקים
+        function updateGamesTable(games, filters) {
+            const tableBody = document.getElementById('games-table-body');
+            tableBody.innerHTML = '';
+            
+            // סינון משחקים לפי הפילטרים
+            const filteredGames = games.filter(game => {
+                // סינון לפי ליגה
+                if (filters.leagueFilter !== 'all' && !game.league.includes(filters.leagueFilter)) {
+                    return false;
+                }
+                
+                // סינון לפי סטטוס
+                if (filters.statusFilter !== 'all' && game.status !== filters.statusFilter) {
+                    return false;
+                }
+                
+                // סינון לפי סוג הזדמנות
+                if (filters.opportunitiesFilter !== 'all') {
+                    if (filters.opportunitiesFilter === 'green' && game.opportunity_type !== 'green') {
+                        return false;
+                    } else if (filters.opportunitiesFilter === 'red' && game.opportunity_type !== 'red') {
+                        return false;
+                    } else if (filters.opportunitiesFilter === 'blue' && game.opportunity_type !== 'blue') {
+                        return false;
+                    }
+                }
+                
+                // סינון לפי תנועת ליין מינימלית
+                if (filters.minLineMovement > 0) {
+                    // בדיקה אם יש תנועת ליין מספקת
+                    let spreadDiff = 0;
+                    let totalDiff = 0;
+                    
+                    if (game.status === 'live') {
+                        spreadDiff = parseFloat(game.live_spread_diff || 0);
+                        totalDiff = parseFloat(game.live_total_diff || 0);
+                    } else {
+                        const currentSpread = parseFloat(game.current_spread || 0);
+                        const openingSpread = parseFloat(game.opening_spread || 0);
+                        const currentTotal = parseFloat(game.current_total || 0);
+                        const openingTotal = parseFloat(game.opening_total || 0);
+                        
+                        spreadDiff = Math.abs(currentSpread - openingSpread);
+                        totalDiff = Math.abs(currentTotal - openingTotal);
+                    }
+                    
+                    if (Math.abs(spreadDiff) < filters.minLineMovement && Math.abs(totalDiff) < filters.minLineMovement) {
+                        return false;
+                    }
+                }
+                
+                return true;
+            });
+            
+            // מיון - קודם משחקים חיים ואז עתידיים
+            filteredGames.sort((a, b) => {
+                // אם אחד חי והשני לא, החי קודם
+                if (a.status === 'live' && b.status !== 'live') return -1;
+                if (a.status !== 'live' && b.status === 'live') return 1;
+                
+                // אם שניהם באותו סטטוס, מיין לפי זמן התחלה
+                if (a.time && b.time) {
+                    return parseFloat(a.time) - parseFloat(b.time);
+                }
+                
+                return 0;
+            });
+            
+            // הוספת שורות לטבלה
+            filteredGames.forEach(game => {
+                tableBody.appendChild(createGameRow(game));
+            });
+        }
         
-        # בניית אובייקט תשובה מפורט יותר
-        return jsonify({
-            'id': game_id,
-            'sportType': 'כדורסל' if game['sport_id'] == '3' else 'כדורגל',
-            'league': game['league'],
-            'date': format_date(game.get('time')),
-            'time': format_time(game.get('time')),
-            'home': game['home'],
-            'away': game['away'],
-            'status': game['status'],
-            'score': game.get('score', ''),
-            'timer': game.get('timer', {}),
-            
-            # ליינים
-            'opening': opening_lines.get(game_id, {}),
-            'current': current_lines.get(game_id, {}),
-            'starting': starting_lines.get(game_id, {}),
-            'live': live_lines.get(game_id, {}),
-            
-            # היסטוריית תוצאות
-            'score_history': score_history.get(game_id, []),
-            
-            # הזדמנויות
-            'opportunity': opportunity
-        })
-
-@app.route('/api/stats')
-def get_stats():
-    """מחזיר סטטיסטיקות"""
-    with data_lock:
-        stats = calculate_stats()
-        return jsonify(stats)
-
-# פונקציות סטטיסטיקה
-def calculate_stats():
-    """חישוב סטטיסטיקות כלליות"""
-    stats = {
-        "total_live": 0,
-        "green_opportunities": 0,
-        "red_opportunities": 0,
-        "opportunity_percentage": 0
-    }
-    
-    live_count = 0
-    opportunity_count = 0
-    
-    for game_id, game in games_data.items():
-        if game['status'] == 'live':
-            live_count += 1
-            opportunity = detect_opportunities(game_id)
-            
-            if opportunity['type'] == 'green':
-                opportunity_count += 1
-                stats["green_opportunities"] += 1
-            elif opportunity['type'] == 'red':
-                stats["red_opportunities"] += 1
-    
-    stats["total_live"] = live_count
-    
-    if live_count > 0:
-        stats["opportunity_percentage"] = int((opportunity_count / live_count) * 100)
-    
-    return stats
-
-# פונקציות עזר לפורמוט
-def format_date(timestamp):
-    """פורמט תאריך"""
-    if not timestamp:
-        return ""
-    
-    date = datetime.fromtimestamp(int(timestamp))
-    return date.strftime("%b %d")  # Apr 30
-
-def format_time(timestamp):
-    """פורמט שעה"""
-    if not timestamp:
-        return ""
-    
-    time = datetime.fromtimestamp(int(timestamp))
-    return time.strftime("%H:%M")  # 18:30
-
-def format_spread(spread):
-    """פורמט ליין ספרד"""
-    if spread is None:
-        return ""
-    
-    return f"{spread:+.1f}".replace('+', '')  # -4.5 או 3.5
-
-def format_total(total):
-    """פורמט ליין טוטאל"""
-    if total is None:
-        return ""
-    
-    return f"{total:.1f}"  # 206.5
-
-def format_diff(current, original):
-    """פורמט הפרש בין ליינים"""
-    if current is None or original is None:
-        return ""
-    
-    diff = float(current) - float(original)
-    return f"{diff:+.1f}"  # +3.5 או -2.0
-
-def format_timer(timer):
-    """פורמט זמן משחק"""
-    if not timer:
-        return ""
-    
-    quarter = timer.get('q', '')
-    minutes = timer.get('tm', '')
-    seconds = timer.get('ts', '')
-    
-    if minutes and seconds:
-        return f"רבע {quarter} ({minutes}:{seconds.zfill(2)})"
-    
-    return ""
-
-def format_shot_rate(rate):
-    """פורמט קצב זריקות"""
-    if rate is None:
-        return ""
-    
-    return f"{rate:.1f}"  # 3.5
-
-# האפליקציה מתחילה כאן
-def startup():
-    """פעולות שרצות בעת עליית השרת"""
-    load_all_data()
-    start_background_tasks()
-
-# קריאה מיידית לפונקציה startup במקום using before_first_request
-with app.app_context():
-    startup()
-
-if __name__ == '__main__':
-    # הפעל רק כשמריצים ישירות
-    daily_games_scan()  # הרץ סריקה ראשונית
-    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+        // הצגת חלון פרטי משחק
+        async function showGameDetails(gameId) {
+            // משיכת פרטי משחק מהשרת
+            try {
+                const response = await fetch(`/api/games/${gameId}/details`);
+                const gameDetails = await response.json();
+                
+                const modalTitle = document.getElementById('game-details-title');
+                const modalBody = document.getElementById('game-details-body');
+                
+                modalTitle.textContent = `${gameDetails.homeTeam} - ${gameDetails.awayTeam}`;
+                
+                // יצירת תוכן המודאל
+                let modalContent = '';
+                
+                // טבלת רבעים
+                modalContent += `
+                <div class="score-section">
+                    <h3 class="section-title">תוצאה</h3>
+                    <table class="quarters-table">
+                        <thead>
+                            <tr>
+                                <th>קבוצה</th>
+                                <th>Q1</th>
+                                <th>Q2</th>
+                                <th>Half</th>
+                                <th>Q3</th>
+                                <th>Q4</th>
+                                <th>T</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td class="team-name"><span class="team-indicator home-indicator"></span>${gameDetails.homeTeam}</td>
+                `;
+                
+                // הוספת נתוני רבעים לקבוצת בית
+                if (gameDetails.quarters && gameDetails.quarters.length > 0) {
+                    // הוספת נק' רבעונים
+                    const homeQuarters = gameDetails.quarters.map(q => q.home || 0);
+                    const homeHalf = (homeQuarters[0] || 0) + (homeQuarters[1] || 0);
+                    
+                    modalContent += `
+                        <td>${homeQuarters[0] || 0}</td>
+                        <td>${homeQuarters[1] || 0}</td>
+                        <td>${homeHalf}</td>
+                        <td>${homeQuarters[2] || 0}</td>
+                        <td>${homeQuarters[3] || 0}</td>
+                        <td class="team-score">${gameDetails.homeScore || 0}</td>
+                    `;
+                } else {
+                    modalContent += `
+                        <td>0</td>
+                        <td>0</td>
+                        <td>0</td>
+                        <td>0</td>
+                        <td>0</td>
+                        <td class="team-score">${gameDetails.homeScore || 0}</td>
+                    `;
+                }
+                
+                modalContent += `
+                            </tr>
+                            <tr>
+                                <td class="team-name"><span class="team-indicator away-indicator"></span>${gameDetails.awayTeam}</td>
+                `;
+                
+                // הוספת נתוני רבעים לקבוצת חוץ
+                if (gameDetails.quarters && gameDetails.quarters.length > 0) {
+                    // הוספת נק' רבעונים
+                    const awayQuarters = gameDetails.quarters.map(q => q.away || 0);
+                    const awayHalf = (awayQuarters[0] || 0) + (awayQuarters[1] || 0);
+                    
+                    modalContent += `
+                        <td>${awayQuarters[0] || 0}</td>
+                        <td>${awayQuarters[1] || 0}</td>
+                        <td>${awayHalf}</td>
+                        <td>${awayQuarters[2] || 0}</td>
+                        <td>${awayQuarters[3] || 0}</td>
+                        <td class="team-score">${gameDetails.awayScore || 0}</td>
+                    `;
+                } else {
+                    modalContent += `
+                        <td>0</td>
+                        <td>0</td>
+                        <td>0</td>
+                        <td>0</td>
+                        <td>0</td>
+                        <td class="team-score">${gameDetails.awayScore || 0}</td>
+                    `;
+                }
+                
+                modalContent += `
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                `;
+                
+                // סטטיסטיקות משחק
+                modalContent += `
+                <div class="stats-section">
+                    <h3 class="section-title">סטטיסטיקה</h3>
+                    <div class="stats-summary">
+                        <div class="stats-item">
+                            <div class="value">${gameDetails.totalFouls?.home || 0}</div>
+                            <div class="label">עבירות</div>
+                        </div>
+                        <div class="stats-item">
+                            <div class="value">${gameDetails.totalPoints2?.home || 0}</div>
+                            <div class="label">2 pts</div>
+                        </div>
+                        <div class="stats-item">
+                            <div class="value">${gameDetails.totalPoints3?.home || 0}</div>
+                            <div class="label">3 pts</div>
+                        </div>
+                        <div class="stats-item">
+                            <div class="value">${gameDetails.percentage2pt || 0}%</div>
+                            <div class="label">2pt %</div>
+                        </div>
+                        <div class="stats-item">
+                            <div class="value">${gameDetails.percentage3pt || 0}%</div>
+                            <div class="label">3pt %</div>
+                        </div>
+                        <div class="stats-item">
+                            <div class="value">${gameDetails.totalFouls?.away || 0}</div>
+                            <div class="label">עבירות</div>
+                        </div>
+                    </div>
+                    
+                    <div class="fouls-indicator">
+                        ${generateFoulsIndicator(gameDetails.totalFouls?.home || 0)}
+                    </div>
+                </div>
+                `;
+                
+                // מידע על השוק וליינים
+                modalContent += `
+                <div class="lines-section">
+                    <h3 class="section-title">התפתחות ליינים</h3>
+                    <table class="details-table">
+                        <thead>
+                            <tr>
+                                <th>זמן</th>
+                                <th>ליין</th>
+                                <th>O/U</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+                
+                // הוספת היסטוריית תנועת ליינים
+                if (gameDetails.movementHistory && gameDetails.movementHistory.length > 0) {
+                    gameDetails.movementHistory.forEach(movement => {
+                        modalContent += `
+                            <tr>
+                                <td>${movement.time}</td>
+                                <td>${movement.spread}</td>
+                                <td>${movement.total}</td>
+                            </tr>
+                        `;
+                    });
+                } else {
+                    modalContent += `
+                        <tr>
+                            <td colspan="3">אין נתונים זמינים</td>
+                        </tr>
+                    `;
+                }
+                
+                modalContent += `
+                        </tbody>
+                    </table>
+                </div>
+                `;
+                
+                // מידע על קצב זריקות
+                modalContent += `
+                <div class="stats-section">
+                    <h3 class="section-title">קצב משחק</h3>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-label">קצב זריקות לדקה</div>
+                            <div class="stat-value ${gameDetails.shotsPerMinute >= 4 ? 'value-blue' : 'value-red'}">${gameDetails.shotsPerMinute || 0}</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">סטטוס קצב</div>
+                            <div class="stat-value ${gameDetails.shotsPerMinute >= 4 ? 'value-blue' : 'value-red'}">
+                                ${gameDetails.shotsPerMinute >= 4 ? 'מהיר' : 'איטי'}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                `;
+                
+                // הזדמנות
+                if (gameDetails.opportunity_type && gameDetails.opportunity_type !== 'neutral') {
+                    const opportunityClass = 
+                        gameDetails.opportunity_type === 'green' ? 'opportunity-green' : 
+                        gameDetails.opportunity_type === 'red' ? 'opportunity-red' : 
+                        gameDetails.opportunity_type === 'blue' ? 'opportunity-blue' : '';
+                    
+                    const opportunityText = 
+                        gameDetails.opportunity_type === 'green' ? 'הזדמנות חיובית' : 
+                        gameDetails.opportunity_type === 'red' ? 'הזדמנות שלילית' : 
+                        gameDetails.opportunity_type === 'blue' ? 'הזדמנות מיוחדת' : '';
+                    
+                    modalContent += `
+                    <div class="opportunity-section">
+                        <h3 class="section-title">ניתוח הזדמנות</h3>
+                        <div class="stats-grid">
+                            <div class="stat-item">
+                                <div class="stat-label">סוג הזדמנות</div>
+                                <div class="stat-value ${opportunityClass}">${opportunityText}</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-label">סיבה</div>
+                                <div class="stat-value">${gameDetails.opportunity_reason || 'שילוב גורמים'}</div>
+                            </div>
+                        </div>
+                    </div>
+                    `;
+                }
+                
+                modalBody.innerHTML = modalContent;
+                
+                // הצגת המודאל
+                const modal = document.getElementById('game-details-modal');
+                modal.style.display = 'flex';
+                
+            } catch (error) {
+                console.error('Error fetching game details:', error);
+            }
+        }
+        
+        // סגירת חלון פרטי משחק
+        function closeGameDetails() {
+            const modal = document.getElementById('game-details-modal');
+            modal.style.display = 'none';
+        }
+        
+        // יצירת אינדיקטור עבירות
+        function generateFoulsIndicator(fouls) {
+            let indicators = '';
+            for (let i = 0; i < 5; i++) {
+                indicators += `<div class="indicator ${i < fouls ? 'active' : ''}"></div>`;
+            }
+            return indicators;
+        }
+        
+        // מאזין אירועים לשינוי פילטרים
+        document.getElementById('sport-filter').addEventListener('change', fetchGames);
+        document.getElementById('league-filter').addEventListener('change', fetchGames);
+        document.getElementById('opportunities-filter').addEventListener('change', fetchGames);
+        document.getElementById('status-filter').addEventListener('change', fetchGames);
+        document.getElementById('min-line-movement').addEventListener('input', fetchGames);
+        
+        // מאזין אירועים לחץ על הלשונית
+        document.querySelectorAll('.nav-tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+                this.classList.add('active');
+                fetchGames();
+            });
+        });
+        
+        // מאזין אירועים לתאריכים
+        document.querySelectorAll('.date-tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                document.querySelectorAll('.date-tab').forEach(t => t.classList.remove('active'));
+                this.classList.add('active');
+                fetchGames();
+            });
+        });
+        
+        // מאזין אירועים לסגירת מודאל בלחיצה על הרקע
+        document.getElementById('game-details-modal').addEventListener('click', function(event) {
+            if (event.target === this) {
+                closeGameDetails();
+            }
+        });
+        
+        // אינטרוול לעדכון זמן נוכחי
+        setInterval(updateCurrentTime, 1000);
+        
+        // אינטרוול לרענון נתונים
+        let refreshInterval;
+        
+        function startAutoRefresh() {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+            }
+            refreshInterval = setInterval(fetchGames, 30000); // כל 30 שניות
+        }
+        
+        function stopAutoRefresh() {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+                refreshInterval = null;
+            }
+        }
+        
+        // מאזין אירועים לריענון אוטומטי
+        document.getElementById('auto-refresh').addEventListener('change', function() {
+            if (this.checked) {
+                startAutoRefresh();
+            } else {
+                stopAutoRefresh();
+            }
+        });
+        
+        // אתחול האתר
+        function init() {
+            updateCurrentTime();
+            fetchGames();
+            startAutoRefresh();
+        }
+        
+        // הפעלת האתר בטעינת הדף
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
