@@ -3,30 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BETBOX - מעקב ליינים והזדמנויות הימור</title>
+    <title>BETBOX - ניתוח משחקי כדורסל חיים</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
         :root {
-            --primary-bg: #181818;
-            --secondary-bg: #222;
-            --header-bg: #333;
-            --text-color: #fff;
-            --text-muted: #aaa;
-            --border-color: #444;
+            --main-bg-color: #0a0a0a;
+            --secondary-bg-color: #181818;
+            --header-bg-color: #1c1c1c;
+            --border-color: #333;
+            --text-color: #e1e1e1;
+            --muted-text-color: #888;
+            --highlight-color: #3a3a3a;
             --green-color: #4caf50;
-            --blue-color: #2196f3;
-            --yellow-color: #ffc107;
             --red-color: #f44336;
+            --blue-color: #2196f3;
+            --gold-color: #ffd700;
         }
         
         * {
-            box-sizing: border-box;
             margin: 0;
             padding: 0;
-            font-family: Arial, sans-serif;
+            box-sizing: border-box;
         }
         
         body {
-            background-color: var(--primary-bg);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            background-color: var(--main-bg-color);
             color: var(--text-color);
             direction: rtl;
         }
@@ -34,348 +36,560 @@
         .container {
             max-width: 1200px;
             margin: 0 auto;
-            padding: 10px;
+            padding: 20px;
         }
         
         header {
-            background-color: var(--header-bg);
-            padding: 15px 0;
-            text-align: center;
-            margin-bottom: 20px;
+            background-color: var(--header-bg-color);
+            padding: 15px 20px;
             border-bottom: 1px solid var(--border-color);
-        }
-        
-        .header-title {
-            font-size: 24px;
-            font-weight: bold;
-        }
-        
-        .header-date {
-            font-size: 14px;
-            color: var(--text-muted);
-            margin-top: 5px;
-        }
-        
-        .filters {
             display: flex;
             justify-content: space-between;
-            margin-bottom: 20px;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        .title {
+            margin: 0;
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+        
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        
+        .stat-card {
+            background-color: var(--secondary-bg-color);
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            border: 1px solid var(--border-color);
+        }
+        
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        
+        .stat-value.percentage {
+            color: var(--green-color);
+        }
+        
+        .stat-label {
+            font-size: 0.9rem;
+            color: var(--muted-text-color);
+        }
+        
+        .filter-controls {
+            display: flex;
+            justify-content: space-between;
+            margin: 20px 0;
+            flex-wrap: wrap;
+            gap: 10px;
         }
         
         .filter-group {
-            background-color: var(--secondary-bg);
-            padding: 10px;
-            border-radius: 5px;
-            flex: 1;
-            margin: 0 5px;
-        }
-        
-        .filter-group label {
-            display: block;
-            margin-bottom: 5px;
-            color: var(--text-muted);
-            font-size: 12px;
-        }
-        
-        .filter-group select, 
-        .filter-group input {
-            width: 100%;
-            padding: 8px;
-            background-color: var(--primary-bg);
+            display: flex;
+            align-items: center;
+            background-color: var(--secondary-bg-color);
+            border-radius: 8px;
+            padding: 5px 15px;
             border: 1px solid var(--border-color);
+        }
+        
+        .filter-label {
+            margin-left: 10px;
+            font-weight: 600;
+        }
+        
+        select, input {
+            background-color: var(--main-bg-color);
             color: var(--text-color);
-            border-radius: 3px;
+            border: 1px solid var(--border-color);
+            padding: 8px 12px;
+            border-radius: 4px;
+            outline: none;
+        }
+        
+        select:focus, input:focus {
+            border-color: var(--highlight-color);
         }
         
         .games-table {
             width: 100%;
             border-collapse: collapse;
+            margin: 20px 0;
+            background-color: var(--secondary-bg-color);
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
         
-        .games-table th,
+        .games-table th {
+            background-color: var(--header-bg-color);
+            color: var(--text-color);
+            padding: 12px 15px;
+            text-align: center;
+            font-weight: 600;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
         .games-table td {
-            padding: 12px 8px;
+            padding: 12px 15px;
             text-align: center;
             border-bottom: 1px solid var(--border-color);
         }
         
-        .games-table th {
-            background-color: var(--header-bg);
-            color: var(--text-muted);
-            font-weight: normal;
-            font-size: 14px;
+        .games-table tr:hover {
+            background-color: var(--highlight-color);
         }
         
-        .games-table tbody tr {
-            background-color: var(--secondary-bg);
+        .games-table tr:last-child td {
+            border-bottom: none;
         }
         
-        .games-table tbody tr:hover {
-            background-color: #2a2a2a;
+        .team-name {
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
         }
         
-        .games-table .date,
-        .games-table .time,
-        .games-table .league {
-            color: var(--yellow-color);
+        .live-indicator {
+            background-color: #f44336;
+            color: white;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            margin-right: 10px;
         }
         
-        .spread,
-        .total {
-            color: var(--text-color);
-            font-weight: bold;
-        }
-        
-        .live-value {
+        .value-green {
             color: var(--green-color);
-            font-weight: bold;
         }
         
-        .negative-value {
+        .value-red {
             color: var(--red-color);
         }
         
-        .green-row {
-            border-right: 4px solid var(--green-color);
+        .value-blue {
+            color: var(--blue-color);
         }
         
-        .blue-row {
-            border-right: 4px solid var(--blue-color);
+        .value-gold {
+            color: var(--gold-color);
+        }
+        
+        .cell-highlight-green {
+            background-color: rgba(76, 175, 80, 0.2);
+            color: var(--green-color);
+        }
+        
+        .cell-highlight-red {
+            background-color: rgba(244, 67, 54, 0.2);
+            color: var(--red-color);
+        }
+        
+        .cell-highlight-blue {
+            background-color: rgba(33, 150, 243, 0.2);
+            color: var(--blue-color);
+        }
+        
+        .shot-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-left: 5px;
+        }
+        
+        .shot-red {
+            background-color: var(--red-color);
+        }
+        
+        .shot-blue {
+            background-color: var(--blue-color);
         }
         
         .refresh-info {
-            margin: 15px 0;
-            font-size: 12px;
-            color: var(--text-muted);
             display: flex;
             justify-content: space-between;
+            align-items: center;
+            color: var(--muted-text-color);
+            font-size: 0.9rem;
+            margin-top: 20px;
         }
         
-        .refresh-controls {
+        .auto-refresh {
             display: flex;
             align-items: center;
         }
         
-        .refresh-controls label {
-            margin-right: 10px;
+        .auto-refresh input[type="checkbox"] {
+            margin-left: 5px;
         }
         
-        .refresh-controls select {
-            background-color: var(--secondary-bg);
-            border: 1px solid var(--border-color);
-            color: var(--text-color);
-            padding: 5px;
-            border-radius: 3px;
+        footer {
+            margin-top: 40px;
+            padding: 20px;
+            text-align: center;
+            color: var(--muted-text-color);
+            font-size: 0.9rem;
+            border-top: 1px solid var(--border-color);
         }
-        
-        .button {
-            background-color: var(--header-bg);
-            border: 1px solid var(--border-color);
-            color: var(--text-color);
-            padding: 8px 15px;
-            border-radius: 3px;
-            cursor: pointer;
-        }
-        
-        .button:hover {
-            background-color: #444;
-        }
-        
-        /* מצב לייב */
-        .status-live {
-            color: var(--red-color);
-            font-weight: bold;
-        }
-        
-        /* התאמה למובייל */
+
         @media (max-width: 768px) {
-            .filters {
+            .dashboard {
+                grid-template-columns: 1fr 1fr;
+            }
+            
+            .filter-controls {
                 flex-direction: column;
             }
             
-            .filter-group {
-                margin: 5px 0;
+            .games-table {
+                font-size: 0.9rem;
             }
             
-            .games-table th,
-            .games-table td {
-                padding: 8px 4px;
-                font-size: 12px;
-            }
-            
-            .games-table .hide-mobile {
-                display: none;
+            .games-table th, .games-table td {
+                padding: 8px 10px;
             }
         }
     </style>
 </head>
 <body>
     <header>
-        <div class="container">
-            <div class="header-title">BETBOX</div>
-            <div class="header-date" id="current-date"></div>
-        </div>
+        <h1 class="title">BETBOX - ניתוח משחקי כדורסל חיים</h1>
+        <div id="current-time"></div>
     </header>
     
     <div class="container">
-        <div class="filters">
-            <div class="filter-group">
-                <label>ספורט</label>
-                <select id="sport-filter">
-                    <option value="all">הכל</option>
-                    <option value="18">כדורסל</option>
-                    <option value="1">כדורגל</option>
-                </select>
+        <div class="dashboard">
+            <div class="stat-card">
+                <div class="stat-value percentage" id="opportunity-percentage">0%</div>
+                <div class="stat-label">אחוז הזדמנויות</div>
             </div>
-            <div class="filter-group">
-                <label>סטטוס</label>
-                <select id="status-filter">
-                    <option value="all">הכל</option>
-                    <option value="upcoming">משחקים קרובים</option>
-                    <option value="live">משחקים חיים</option>
-                </select>
+            <div class="stat-card">
+                <div class="stat-value" id="red-opportunities">0</div>
+                <div class="stat-label">הזדמנויות כושלות</div>
             </div>
-            <div class="filter-group">
-                <label>ליגה</label>
-                <select id="league-filter">
-                    <option value="all">הכל</option>
-                </select>
+            <div class="stat-card">
+                <div class="stat-value value-green" id="green-opportunities">0</div>
+                <div class="stat-label">הזדמנויות ירוקות</div>
             </div>
-            <div class="filter-group">
-                <label>הזדמנויות</label>
-                <select id="opportunity-filter">
-                    <option value="all">הכל</option>
-                    <option value="green">ירוק - ביטחון גבוה</option>
-                    <option value="blue">כחול - מצבי</option>
-                </select>
+            <div class="stat-card">
+                <div class="stat-value" id="total-live">0</div>
+                <div class="stat-label">משחקים חיים</div>
             </div>
         </div>
         
-        <div class="refresh-info">
-            <div id="last-update">עדכון אחרון: --:--</div>
-            <div class="refresh-controls">
-                <label>רענון אוטומטי:</label>
-                <select id="auto-refresh">
-                    <option value="10">כל 10 שניות</option>
-                    <option value="30" selected>כל 30 שניות</option>
-                    <option value="60">כל דקה</option>
+        <div class="filter-controls">
+            <div class="filter-group">
+                <span class="filter-label">תנועת ליין (מינימום):</span>
+                <input type="number" id="min-line-movement" value="0" min="0" step="0.5">
+            </div>
+            
+            <div class="filter-group">
+                <span class="filter-label">הזדמנויות:</span>
+                <select id="opportunities-filter">
+                    <option value="all">הכל</option>
+                    <option value="green">ירוקות</option>
+                    <option value="red">אדומות</option>
+                    <option value="blue">כחולות</option>
                 </select>
-                <button class="button" id="refresh-button">רענן עכשיו</button>
+            </div>
+            
+            <div class="filter-group">
+                <span class="filter-label">ליגה:</span>
+                <select id="league-filter">
+                    <option value="all">הכל</option>
+                    <option value="NBA">NBA</option>
+                    <option value="Euroleague">יורוליג</option>
+                    <option value="Spain">ספרד</option>
+                    <option value="Israel">ישראל</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <span class="filter-label">ספורט:</span>
+                <select id="sport-filter">
+                    <option value="all">הכל</option>
+                    <option value="כדורסל" selected>כדורסל</option>
+                    <option value="כדורגל">כדורגל</option>
+                </select>
             </div>
         </div>
         
         <table class="games-table">
             <thead>
                 <tr>
-                    <th>תאריך</th>
-                    <th>שעה</th>
+                    <th>ספורט</th>
                     <th>ליגה</th>
                     <th>משחק</th>
-                    <th>ספרד</th>
-                    <th>O/U</th>
-                    <th class="hide-mobile">ליין נוכחי</th>
+                    <th>זמן</th>
+                    <th>תוצאה</th>
+                    <th>ליין פתיחה</th>
                     <th>ליין התחלה</th>
-                    <th>ליין לייב</th>
-                    <th>O/U לייב</th>
+                    <th>ליין נוכחי</th>
+                    <th>O/U פתיחה</th>
+                    <th>O/U התחלה</th>
+                    <th>O/U נוכחי</th>
+                    <th>קצב זריקות</th>
+                    <th>הזדמנות</th>
                 </tr>
             </thead>
-            <tbody id="games-tbody">
-                <!-- תוכן הטבלה ימולא דרך JavaScript -->
+            <tbody id="games-table-body">
+                <!-- דינמי - יתמלא בג'אווהסקריפט -->
             </tbody>
         </table>
+        
+        <div class="refresh-info">
+            <div class="last-update">עדכון אחרון: <span id="last-update-time"></span></div>
+            <div class="auto-refresh">
+                <input type="checkbox" id="auto-refresh" checked>
+                <label for="auto-refresh">רענון אוטומטי: כל 30 שניות</label>
+            </div>
+        </div>
     </div>
     
+    <footer>
+        &copy; 2025 BETBOX - כל הזכויות שמורות
+    </footer>
+    
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            // עדכון התאריך הנוכחי
-            updateCurrentDate();
+        // עדכון שעה נוכחית
+        function updateCurrentTime() {
+            const now = new Date();
+            const timeString = now.toLocaleTimeString('he-IL');
+            document.getElementById('current-time').textContent = timeString;
+        }
+        
+        // פורמט תאריך/זמן לעדכון אחרון
+        function formatDateTime(date) {
+            const day = String(date.getDate()).padStart(2, '0');
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const year = date.getFullYear();
+            const hours = String(date.getHours()).padStart(2, '0');
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const seconds = String(date.getSeconds()).padStart(2, '0');
             
-            // אתחול הרענון האוטומטי
-            const autoRefreshSelect = document.getElementById('auto-refresh');
+            return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;
+        }
+        
+        // עדכון זמן ריענון אחרון
+        function updateLastRefreshTime() {
+            const now = new Date();
+            document.getElementById('last-update-time').textContent = formatDateTime(now);
+        }
+        
+        // יצירת מחוון קצב זריקות
+        function renderShotRate(shotRate, shotRateColor) {
+            if (!shotRate) return "-";
+            
+            let html = "";
+            if (shotRateColor === "red") {
+                html = `<span class="shot-indicator shot-red"></span>`;
+            } else if (shotRateColor === "blue") {
+                html = `<span class="shot-indicator shot-blue"></span>`;
+            }
+            
+            return `${html}${shotRate}`;
+        }
+        
+        // עדכון מידע על הזדמנויות בדשבורד
+        function updateDashboard(stats) {
+            document.getElementById('opportunity-percentage').textContent = `${stats.opportunity_percentage}%`;
+            document.getElementById('red-opportunities').textContent = stats.red_opportunities;
+            document.getElementById('green-opportunities').textContent = stats.green_opportunities;
+            document.getElementById('total-live').textContent = stats.total_live;
+        }
+        
+        // יצירת שורת טבלה למשחק
+        function createGameRow(game) {
+            const row = document.createElement('tr');
+            row.id = `game-row-${game.id}`;
+            
+            // הוספת קלאס לטיפוס הזדמנות
+            if (game.opportunity_type === "green") {
+                row.classList.add('row-opportunity-green');
+            } else if (game.opportunity_type === "red") {
+                row.classList.add('row-opportunity-red');
+            } else if (game.opportunity_type === "blue") {
+                row.classList.add('row-opportunity-blue');
+            }
+            
+            // יצירת תוכן שורה
+            row.innerHTML = `
+                <td>${game.sportType}</td>
+                <td class="value-gold">${game.league}</td>
+                <td>
+                    <div class="team-name">
+                        ${game.matchup}
+                        ${game.status === 'live' ? '<span class="live-indicator">חי</span>' : ''}
+                    </div>
+                </td>
+                <td>${game.timer || game.time || ''}</td>
+                <td>${game.score || '-'}</td>
+                <td>${game.opening_spread || '-'}</td>
+                <td id="start-spread-${game.id}" class="${game.opening_vs_start === 'green' ? 'cell-highlight-green' : game.opening_vs_start === 'red' ? 'cell-highlight-red' : ''}">${game.start_spread || '-'}</td>
+                <td id="live-spread-${game.id}" class="${game.spread_flag === 'green' ? 'cell-highlight-green' : ''}">${game.live_spread || '-'}</td>
+                <td>${game.opening_total || '-'}</td>
+                <td id="start-total-${game.id}" class="${game.opening_vs_start === 'green' ? 'cell-highlight-green' : game.opening_vs_start === 'red' ? 'cell-highlight-red' : ''}">${game.start_total || '-'}</td>
+                <td id="live-total-${game.id}" class="${game.ou_flag === 'green' ? 'cell-highlight-green' : ''}">${game.live_total || '-'}</td>
+                <td id="shot-rate-${game.id}" class="${game.shot_rate_color === 'red' ? 'value-red' : game.shot_rate_color === 'blue' ? 'value-blue' : ''}">
+                    ${renderShotRate(game.shot_rate, game.shot_rate_color)}
+                </td>
+                <td class="${game.opportunity_type === 'green' ? 'value-green' : game.opportunity_type === 'red' ? 'value-red' : game.opportunity_type === 'blue' ? 'value-blue' : ''}">
+                    ${game.opportunity_type !== 'neutral' ? 'כן' : '-'}
+                </td>
+            `;
+            
+            return row;
+        }
+        
+        // משיכת משחקים מהשרת
+        async function fetchGames() {
+            try {
+                // סינון
+                const sportFilter = document.getElementById('sport-filter').value;
+                const leagueFilter = document.getElementById('league-filter').value;
+                const opportunitiesFilter = document.getElementById('opportunities-filter').value;
+                const minLineMovement = document.getElementById('min-line-movement').value;
+                
+                // בניית URL עם פרמטרים
+                let url = '/api/games';
+                const params = new URLSearchParams();
+                
+                if (sportFilter !== 'all') {
+                    params.append('sport_type', sportFilter);
+                }
+                
+                const response = await fetch(url + (params.toString() ? `?${params.toString()}` : ''));
+                const games = await response.json();
+                
+                // משיכת סטטיסטיקות
+                const statsResponse = await fetch('/api/stats');
+                const stats = await statsResponse.json();
+                
+                // עדכון ממשק משתמש
+                updateDashboard(stats);
+                updateGamesTable(games, { 
+                    leagueFilter, 
+                    opportunitiesFilter, 
+                    minLineMovement: parseFloat(minLineMovement) 
+                });
+                updateLastRefreshTime();
+            } catch (error) {
+                console.error('Error fetching games:', error);
+            }
+        }
+        
+        // עדכון טבלת המשחקים
+        function updateGamesTable(games, filters) {
+            const tableBody = document.getElementById('games-table-body');
+            tableBody.innerHTML = '';
+            
+            // סינון משחקים לפי הפילטרים
+            const filteredGames = games.filter(game => {
+                // סינון לפי ליגה
+                if (filters.leagueFilter !== 'all' && !game.league.includes(filters.leagueFilter)) {
+                    return false;
+                }
+                
+                // סינון לפי סוג הזדמנות
+                if (filters.opportunitiesFilter !== 'all') {
+                    if (filters.opportunitiesFilter === 'green' && game.opportunity_type !== 'green') {
+                        return false;
+                    } else if (filters.opportunitiesFilter === 'red' && game.opportunity_type !== 'red') {
+                        return false;
+                    } else if (filters.opportunitiesFilter === 'blue' && game.opportunity_type !== 'blue') {
+                        return false;
+                    }
+                }
+                
+                // סינון לפי תנועת ליין מינימלית
+                if (filters.minLineMovement > 0) {
+                    // בדיקה אם יש תנועת ליין מספקת
+                    const spreadDiff = parseFloat(game.live_spread_diff || 0);
+                    const totalDiff = parseFloat(game.live_total_diff || 0);
+                    
+                    if (Math.abs(spreadDiff) < filters.minLineMovement && Math.abs(totalDiff) < filters.minLineMovement) {
+                        return false;
+                    }
+                }
+                
+                return true;
+            });
+            
+            // הוספת שורות לטבלה
+            filteredGames.forEach(game => {
+                tableBody.appendChild(createGameRow(game));
+            });
+            
+            // הודעה אם אין משחקים
+            if (filteredGames.length === 0) {
+                const emptyRow = document.createElement('tr');
+                emptyRow.innerHTML = `<td colspan="13" style="text-align: center;">אין משחקים התואמים את הפילטרים</td>`;
+                tableBody.appendChild(emptyRow);
+            }
+        }
+        
+        // הגדרת רענון אוטומטי
+        function setupAutoRefresh() {
+            const autoRefreshCheckbox = document.getElementById('auto-refresh');
             let refreshInterval;
             
-            function setAutoRefresh() {
+            function startAutoRefresh() {
+                refreshInterval = setInterval(fetchGames, 30000); // כל 30 שניות
+            }
+            
+            function stopAutoRefresh() {
                 clearInterval(refreshInterval);
-                const seconds = parseInt(autoRefreshSelect.value);
-                refreshInterval = setInterval(fetchGames, seconds * 1000);
             }
             
-            autoRefreshSelect.addEventListener('change', setAutoRefresh);
-            
-            // אתחול פילטרים
-            const sportFilter = document.getElementById('sport-filter');
-            const statusFilter = document.getElementById('status-filter');
-            const leagueFilter = document.getElementById('league-filter');
-            const opportunityFilter = document.getElementById('opportunity-filter');
-            
-            sportFilter.addEventListener('change', fetchGames);
-            statusFilter.addEventListener('change', fetchGames);
-            leagueFilter.addEventListener('change', applyFilters);
-            opportunityFilter.addEventListener('change', applyFilters);
-            
-            // כפתור רענון ידני
-            document.getElementById('refresh-button').addEventListener('click', fetchGames);
-            
-            // משתנים גלובליים
-            let allGames = [];
-            
-            // פונקציה לעדכון התאריך
-            function updateCurrentDate() {
-                const now = new Date();
-                const options = { year: 'numeric', month: 'long', day: 'numeric' };
-                document.getElementById('current-date').textContent = now.toLocaleDateString('he-IL', options);
-            }
-            
-            // פונקציה להבאת המשחקים מהשרת
-            function fetchGames() {
-                const sport = sportFilter.value;
-                const status = statusFilter.value;
-                
-                let url = `/api/games?sport_id=${sport}`;
-                if (status !== 'all') {
-                    url += `&status=${status}`;
+            autoRefreshCheckbox.addEventListener('change', function() {
+                if (this.checked) {
+                    startAutoRefresh();
+                } else {
+                    stopAutoRefresh();
                 }
-                
-                fetch(url)
-                    .then(response => response.json())
-                    .then(data => {
-                        allGames = data;
-                        updateLeagueOptions();
-                        applyFilters();
-                        updateLastUpdateTime();
-                    })
-                    .catch(error => {
-                        console.error('Error fetching games:', error);
-                    });
-            }
+            });
             
-            // פונקציה לעדכון אפשרויות הליגה בפילטר
-            function updateLeagueOptions() {
-                const leagues = new Set();
-                allGames.forEach(game => leagues.add(game.league));
-                
-                const currentLeague = leagueFilter.value;
-                leagueFilter.innerHTML = '<option value="all">הכל</option>';
-                
-                leagues.forEach(league => {
-                    const option = document.createElement('option');
-                    option.value = league;
-                    option.textContent = league;
-                    leagueFilter.appendChild(option);
-                });
-                
-                if (Array.from(leagues).includes(currentLeague)) {
-                    leagueFilter.value = currentLeague;
-                }
+            // הגדרה ראשונית
+            if (autoRefreshCheckbox.checked) {
+                startAutoRefresh();
             }
+        }
+        
+        // הגדרת מאזיני אירועים לפילטרים
+        function setupFilterEventListeners() {
+            const filters = [
+                'sport-filter', 
+                'league-filter', 
+                'opportunities-filter', 
+                'min-line-movement'
+            ];
             
-            // פונקציה לסינון המשחקים לפי הפילטרים
-            function applyFilters() {
-                const selectedLeague = leagueFilter.value;
-                const selectedOpportunity = opportunityFilter.value;
-                
-                let filteredGames = [...allGames];
-                
-                if (selectedLeague !== 'all') {
-                    filteredGames = filteredGames.filter(game => game.league === selectedLeague);
-                }
+            filters.forEach(filterId => {
+                document.getElementById(filterId).addEventListener('change', fetchGames);
+            });
+        }
+        
+        // אתחול
+        document.addEventListener('DOMContentLoaded', function() {
+            updateCurrentTime();
+            setInterval(updateCurrentTime, 1000);
+            
+            fetchGames();
+            setupAutoRefresh();
+            setupFilterEventListeners();
+        });
+    </script>
+</body>
+</html>
