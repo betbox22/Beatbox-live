@@ -97,17 +97,21 @@ def fetch_odds(game_id):
     try:
         # במקום הקוד הקיים, השתמש בקוד הבא שמחזיר נתונים מגוונים יותר
         import random
+        import hashlib
         
         # צור ערכים אקראיים שונים לכל משחק
         # השתמש ב-game_id כסיד לאקראיות כדי שכל משחק יקבל ערכים שונים
-        random.seed(game_id)
+        seed_str = f"{game_id}-{datetime.now().day}"
+        seed = int(hashlib.md5(seed_str.encode()).hexdigest(), 16) % 10000
+        random.seed(seed)
         
-        base_spread = -5 + random.uniform(-5, 5)
-        base_total = 180 + random.uniform(-20, 40)
+        # יצירת ערכים בסיסיים מגוונים
+        base_spread = -5 + random.uniform(-8, 8)
+        base_total = 180 + random.uniform(-30, 50)
         
-        # הוסף שינוי רנדומלי קטן לדמות שינויים בליין
-        spread = base_spread + random.uniform(-2, 2)
-        total = base_total + random.uniform(-5, 5)
+        # הוסף שינוי קטן לדמות שינויים בליין
+        spread = base_spread + random.uniform(-3, 3)
+        total = base_total + random.uniform(-10, 10)
         
         return {
             'spread': round(spread, 1),
@@ -646,15 +650,17 @@ def format_shot_rate(rate):
     
     return f"{rate:.1f}"  # 3.5
 
-# תחילת התוכנית
-@app.before_first_request
+# האפליקציה מתחילה כאן
 def startup():
     """פעולות שרצות בעת עליית השרת"""
     load_all_data()
     start_background_tasks()
 
+# קריאה מיידית לפונקציה startup במקום using before_first_request
+with app.app_context():
+    startup()
+
 if __name__ == '__main__':
     # הפעל רק כשמריצים ישירות
-    load_all_data()
     daily_games_scan()  # הרץ סריקה ראשונית
     app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
