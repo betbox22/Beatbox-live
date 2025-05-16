@@ -590,6 +590,103 @@
             setupAutoRefresh();
             setupFilterEventListeners();
         });
-    </script>
+    </script>// הוסף את הקוד הזה לחלק ה-JavaScript בקובץ index.html
+function createGameRow(game) {
+    const row = document.createElement('tr');
+    row.id = `game-row-${game.id}`;
+    
+    // הוסף מאזין אירועים ללחיצה על השורה
+    row.addEventListener('click', function() {
+        showGameDetails(game.id);
+    });
+    
+    // הוסף קלאס לטיפוס הזדמנות וסגנון מעבר עכבר
+    row.classList.add('clickable-row');
+    if (game.opportunity_type === "green") {
+        row.classList.add('row-opportunity-green');
+    } else if (game.opportunity_type === "red") {
+        row.classList.add('row-opportunity-red');
+    } else if (game.opportunity_type === "blue") {
+        row.classList.add('row-opportunity-blue');
+    }
+    
+    // השאר הקוד נשאר זהה...
+}
+
+// פונקציה להצגת פרטי משחק
+async function showGameDetails(gameId) {
+    try {
+        const response = await fetch(`/api/game/${gameId}`);
+        const gameDetails = await response.json();
+        
+        // יצירת חלון מודאלי
+        const modal = document.createElement('div');
+        modal.className = 'game-details-modal';
+        
+        // תוכן המודאל
+        modal.innerHTML = `
+            <div class="modal-content">
+                <span class="close-modal">&times;</span>
+                <h2>${gameDetails.home} vs ${gameDetails.away}</h2>
+                <div class="game-stats">
+                    <div class="score-section">
+                        <h3>תוצאה: ${gameDetails.score || '-'}</h3>
+                        <p>זמן: ${gameDetails.timer?.q ? 'רבע ' + gameDetails.timer.q + ' (' + gameDetails.timer.tm + ':' + gameDetails.timer.ts + ')' : '-'}</p>
+                    </div>
+                    
+                    <div class="lines-section">
+                        <h3>מידע על ליינים:</h3>
+                        <table class="details-table">
+                            <tr>
+                                <th></th>
+                                <th>ספרד</th>
+                                <th>אובר/אנדר</th>
+                            </tr>
+                            <tr>
+                                <td>פתיחה</td>
+                                <td>${gameDetails.opening?.spread || '-'}</td>
+                                <td>${gameDetails.opening?.total || '-'}</td>
+                            </tr>
+                            <tr>
+                                <td>התחלה</td>
+                                <td>${gameDetails.starting?.spread || '-'}</td>
+                                <td>${gameDetails.starting?.total || '-'}</td>
+                            </tr>
+                            <tr>
+                                <td>לייב</td>
+                                <td>${gameDetails.live?.spread || '-'}</td>
+                                <td>${gameDetails.live?.total || '-'}</td>
+                            </tr>
+                        </table>
+                    </div>
+                    
+                    <div class="opportunity-section">
+                        <h3>ניתוח הזדמנות:</h3>
+                        <p class="opportunity-${gameDetails.opportunity.type}">${gameDetails.opportunity.reason || 'אין הזדמנות'}</p>
+                        ${gameDetails.shot_rate ? `<p>קצב זריקות: ${gameDetails.shot_rate.toFixed(1)}</p>` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // הוסף את המודאל לדף
+        document.body.appendChild(modal);
+        
+        // הגדר אירוע סגירה
+        modal.querySelector('.close-modal').addEventListener('click', function() {
+            document.body.removeChild(modal);
+        });
+        
+        // סגירה בלחיצה מחוץ למודאל
+        modal.addEventListener('click', function(event) {
+            if (event.target === modal) {
+                document.body.removeChild(modal);
+            }
+        });
+        
+    } catch (error) {
+        console.error('Error fetching game details:', error);
+    }
+}
 </body>
 </html>
