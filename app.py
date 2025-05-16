@@ -74,7 +74,7 @@ def fetch_upcoming_games():
     """מביא משחקים קרובים מה-API"""
     try:
         url = f"{API_BASE_URL}/events/upcoming"
-        params = {"token": API_TOKEN}
+        params = {"token": API_TOKEN, "sport_id": "3"}  # 3 = כדורסל
         response = requests.get(url, params=params)
         return response.json().get('results', [])
     except Exception as e:
@@ -95,20 +95,19 @@ def fetch_inplay_games():
 def fetch_odds(game_id):
     """מביא יחסי הימור עבור משחק"""
     try:
-        # בפועל יש לקרוא ל-API אמיתי
-        # זו פונקציית דמה למטרות הדגמה
+        # במקום הקוד הקיים, השתמש בקוד הבא שמחזיר נתונים מגוונים יותר
         import random
         
-        if game_id in opening_lines:
-            base_spread = opening_lines[game_id].get('spread', 0)
-            base_total = opening_lines[game_id].get('total', 180)
-        else:
-            base_spread = -5 + random.uniform(-3, 3)
-            base_total = 180 + random.uniform(-10, 10)
+        # צור ערכים אקראיים שונים לכל משחק
+        # השתמש ב-game_id כסיד לאקראיות כדי שכל משחק יקבל ערכים שונים
+        random.seed(game_id)
+        
+        base_spread = -5 + random.uniform(-5, 5)
+        base_total = 180 + random.uniform(-20, 40)
         
         # הוסף שינוי רנדומלי קטן לדמות שינויים בליין
-        spread = base_spread + random.uniform(-1, 1)
-        total = base_total + random.uniform(-3, 3)
+        spread = base_spread + random.uniform(-2, 2)
+        total = base_total + random.uniform(-5, 5)
         
         return {
             'spread': round(spread, 1),
@@ -415,6 +414,8 @@ def get_games():
                 'time': format_time(game.get('time')),
                 'matchup': f"{game['home']} vs {game['away']}",
                 'status': game['status'],
+                'home': game['home'],
+                'away': game['away'],
                 
                 # ליינים שונים - פורמט והתאמה לעיצוב
                 'opening_spread': format_spread(opening_spread),
@@ -547,6 +548,44 @@ def get_game(game_id):
             'opportunity': opportunity
         })
 
+@app.route('/api/stats')
+def get_stats():
+    """מחזיר סטטיסטיקות"""
+    with data_lock:
+        stats = calculate_stats()
+        return jsonify(stats)
+
+# פונקציות סטטיסטיקה
+def calculate_stats():
+    """חישוב סטטיסטיקות כלליות"""
+    stats = {
+        "total_live": 0,
+        "green_opportunities": 0,
+        "red_opportunities": 0,
+        "opportunity_percentage": 0
+    }
+    
+    live_count = 0
+    opportunity_count = 0
+    
+    for game_id, game in games_data.items():
+        if game['status'] == 'live':
+            live_count += 1
+            opportunity = detect_opportunities(game_id)
+            
+            if opportunity['type'] == 'green':
+                opportunity_count += 1
+                stats["green_opportunities"] += 1
+            elif opportunity['type'] == 'red':
+                stats["red_opportunities"] += 1
+    
+    stats["total_live"] = live_count
+    
+    if live_count > 0:
+        stats["opportunity_percentage"] = int((opportunity_count / live_count) * 100)
+    
+    return stats
+
 # פונקציות עזר לפורמוט
 def format_date(timestamp):
     """פורמט תאריך"""
@@ -606,43 +645,6 @@ def format_shot_rate(rate):
         return ""
     
     return f"{rate:.1f}"  # 3.5
-
-# פונקציות סטטיסטיקה
-def calculate_stats():
-    """חישוב סטטיסטיקות כלליות"""
-    stats = {
-        "total_live": 0,
-        "green_opportunities": 0,
-        "red_opportunities": 0,
-        "opportunity_percentage": 0
-    }
-    
-    live_count = 0
-    opportunity_count = 0
-    
-    for game_id, game in games_data.items():
-        if game['status'] == 'live':
-            live_count += 1
-            opportunity = detect_opportunities(game_id)
-            
-            if opportunity['type'] == 'green':
-                opportunity_count += 1
-                stats["green_opportunities"] += 1
-            elif opportunity['type'] == 'red':
-                stats["red_opportunities"] += 1
-    
-    stats["total_live"] = live_count
-    
-    if live_count > 0:
-        stats["opportunity_percentage"] = int((opportunity_count / live_count) * 100)
-    
-    return stats
-
-@app.route('/api/stats')
-def get_stats():
-    """מחזיר סטטיסטיקות"""
-    with data_lock:
-        return jsonify(calculate_stats())
 
 # תחילת התוכנית
 @app.before_first_request
