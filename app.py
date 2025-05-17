@@ -190,10 +190,32 @@ def get_stats():
         total_games = len(opportunities)
         opportunity_percentage = round((total_opportunities / total_games * 100) if total_games > 0 else 0)
         
-        # ספירת משחקים חיים ועתידיים
-        # זה יהיה יותר מדויק אם נשמור גם היסטוריה של סטטוס משחקים
-        total_live = 15  # דוגמה - יש להחליף עם מידע אמיתי
-        total_upcoming = 23  # דוגמה - יש להחליף עם מידע אמיתי
+        # ספירת משחקים חיים ועתידיים מנתוני API ריאלטיים
+        total_live = 0
+        total_upcoming = 0
+        
+        try:
+            # קריאה ל-API לקבלת נתוני משחקים עדכניים
+            params = {
+                "sport_id": SPORT_ID,
+                "token": B365_TOKEN
+            }
+            response = requests.get(B365_API_URL, params=params)
+            if response.status_code == 200:
+                games_data = response.json()
+                if 'results' in games_data:
+                    # ספירת משחקים לפי סטטוס
+                    for game in games_data['results']:
+                        status = game.get('time_status')
+                        if status == '1':  # משחק חי
+                            total_live += 1
+                        elif status == '0':  # משחק עתידי
+                            total_upcoming += 1
+        except Exception as e:
+            app.logger.error(f"Error counting games: {str(e)}")
+            # במקרה של שגיאה, נציג לפחות את מספר המשחקים בהיסטוריה שלנו
+            total_live = sum(1 for game_id, opps in opportunities.items() if opps.get('time_status') == '1')
+            total_upcoming = sum(1 for game_id, opps in opportunities.items() if opps.get('time_status') == '0')
         
         stats = {
             "opportunity_percentage": opportunity_percentage,
@@ -231,113 +253,141 @@ def extract_lines_from_game(game):
         'spread': None,
         'total': None,
         'time_status': game.get('time_status'),
-        'timestamp': datetime.now().isoformat()
+        'timestamp': datetime.now().isoformat(),
+        'quarter': None,
+        'time_remaining': None
     }
     
-    # בדיקה האם יש מידע על שווקים במשחק
-    if 'markets' in game and isinstance(game['markets'], list):
-        for market in game['markets']:
-            # חיפוש שוק ספרד (Handicap)
-            if market.get('name') in ['Handicap', 'Point Spread']:
+    # חילוץ מידע על רבע ושעון משחק
+    if 'timer' in game:
+        timer = game.get('timer', {})
+        lines_data['quarter'] = timer.get('q')
+        lines_data['time_remaining'] = timer.get('tm')
+    
+    # מחלץ נתוני קו ישירות מה-odds אם יש
+    if 'odds' in game:
+        for market_type, market_data in game['odds'].items():
+            # חיפוש שוק ספרד בפורמט B365
+            if market_type in ['handicap', 'handicap_line', 'ah', 'point_spread']:
                 try:
-                    # חיפוש הליין עצמו בתוך הבחירות
-                    for selection in market.get('selections', []):
-                        if 'handicap' in selection:
-                            # שמירת ערך הספרד
-                            lines_data['spread'] = float(selection['handicap'])
-                            break
+                    handicap_val = float(market_data)
+                    lines_data['spread'] = handicap_val
                 except (ValueError, TypeError):
                     pass
             
-            # חיפוש שוק טוטאל (Total Points)
-            elif market.get('name') in ['Total Points', 'Over/Under']:
+            # חיפוש שוק טוטאל בפורמט B365
+            elif market_type in ['total', 'total_line', 'ou']:
                 try:
-                    # חיפוש הליין עצמו בתוך הבחירות
-                    for selection in market.get('selections', []):
-                        if 'handicap' in selection and selection.get('name', '').lower().startswith('over'):
-                            # שמירת ערך הטוטאל
-                            lines_data['total'] = float(selection['handicap'])
-                            break
+                    total_val = float(market_data)
+                    lines_data['total'] = total_val
                 except (ValueError, TypeError):
                     pass
     
-    # גיבוי: אם אין מידע ישיר על שווקים, ננסה למצוא באובייקט odds
-    if (lines_data['spread'] is None or lines_data['total'] is None) and 'odds' in game:
-        odds = game['odds']
-        
-        # חיפוש ספרד
-        if lines_data['spread'] is None:
-            spread_keys = ['handicap', 'point_spread', 'spread', 'ps']
-            for key in spread_keys:
-                if key in odds:
-                    try:
-                        lines_data['spread'] = float(odds[key])
-                        break
-                    except (ValueError, TypeError):
-                        pass
-        
-        # חיפוש טוטאל
-        if lines_data['total'] is None:
-            total_keys = ['total', 'over_under', 'ou', 'tot']
-            for key in total_keys:
-                if key in odds:
-                    try:
-                        lines_data['total'] = float(odds[key])
-                        break
-                    except (ValueError, TypeError):
-                        pass
+    # טיפול ישיר בבחירות (selections) - בהתבסס על התמונה הראשונה
+    # שם רואים שיש קו +18.5 בקו 1.80
+    if not lines_data['spread'] and 'extra' in game:
+        extra = game.get('extra', {})
+        if 'handicap' in extra:
+            try:
+                lines_data['spread'] = float(extra['handicap'])
+            except (ValueError, TypeError):
+                pass
     
-    # חישוב ערכים משוערים אם עדיין אין לנו נתונים
+    # טיפול ישיר במידע מהתמונה השנייה
+    # כאן אנחנו רואים ליינים כמו 3.5-, 15.5-, וכו'
+    if not lines_data['spread'] and 'odds' in game:
+        # ניסיון לחלץ מידע במבנה שונה
+        for key, value in game['odds'].items():
+            if 'ah_home' in key or 'handicap_home' in key:
+                try:
+                    lines_data['spread'] = float(value)
+                    break
+                except (ValueError, TypeError):
+                    pass
     
-    # אפשרות 1: ליין ספרד מחושב מהתוצאה הנוכחית (עבור משחקים חיים)
-    if lines_data['spread'] is None and game.get('time_status') == '1' and game.get('ss'):
+    # לפי התמונה השנייה, מחלצים גם את הטוטאל
+    if not lines_data['total'] and 'odds' in game:
+        for key, value in game['odds'].items():
+            if 'total' in key.lower() and 'over' in key.lower():
+                try:
+                    lines_data['total'] = float(value)
+                    break
+                except (ValueError, TypeError):
+                    pass
+    
+    # אם עדיין אין לנו נתונים, ננסה לחלץ מהשדות המוצגים בתמונה
+    if (not lines_data['spread'] or not lines_data['total']) and 'ss' in game:
         try:
+            # בתמונה 1 רואים שיש תוצאה כרגע 52-38
             scores = game['ss'].split('-')
-            home_score = int(scores[0])
-            away_score = int(scores[1])
-            score_diff = home_score - away_score
+            home_score = int(scores[0].strip())
+            away_score = int(scores[1].strip())
             
-            # מבנה התצוגה של ליין הספרד: מספר חיובי אומר שהקבוצה האורחת מקבלת נקודות
-            # לכן, אם ההפרש חיובי (הביתית מובילה) אז הליין יהיה שלילי וההפך
-            spread_estimate = -score_diff - 1.5  # הוספת 1.5 למרווח בטחון
-            lines_data['spread'] = round(spread_estimate, 1)
-        except (ValueError, IndexError):
-            pass
-    
-    # אפשרות 2: טוטאל מחושב מהתוצאה הנוכחית והזמן שנותר במשחק
-    if lines_data['total'] is None and game.get('time_status') == '1' and game.get('ss'):
-        try:
-            scores = game['ss'].split('-')
-            home_score = int(scores[0])
-            away_score = int(scores[1])
-            current_total = home_score + away_score
+            # אם אין לנו ספרד, ננסה לחשב לפי התוצאה הנוכחית
+            if not lines_data['spread']:
+                score_diff = home_score - away_score
+                if score_diff > 0:
+                    # הקבוצה הביתית מובילה, אז נותנים יתרון לאורחת
+                    lines_data['spread'] = round(score_diff + 3.5, 1)  # הוספת שולי ביטחון
+                else:
+                    # הקבוצה האורחת מובילה, נותנים יתרון לביתית
+                    lines_data['spread'] = round(score_diff - 3.5, 1)  # הוספת שולי ביטחון
             
-            # חישוב טוטאל משוער לפי רבע והתוצאה הנוכחית
-            quarter = int(game.get('timer', {}).get('q', 0))
-            minutes_left = 0
-            
-            # חישוב זמן נותר במשחק
-            if quarter > 0:
-                minutes_played = (quarter - 1) * 10  # נניח שכל רבע הוא 10 דקות
+            # אם אין לנו טוטאל, ננסה להעריך לפי התוצאה והרבע
+            if not lines_data['total']:
+                current_total = home_score + away_score
+                quarter = int(lines_data['quarter'] or 0)
                 
-                if 'tm' in game.get('timer', {}):
-                    timer_parts = game['timer']['tm'].split(':')
-                    if len(timer_parts) == 2:
-                        minutes_played += 10 - (int(timer_parts[0]) + int(timer_parts[1]) / 60)
-                
-                minutes_left = 40 - minutes_played  # 4 רבעים * 10 דקות
-                
-                if minutes_left > 0:
-                    # יחס הנקודות לדקה עד כה
-                    points_per_minute = current_total / minutes_played if minutes_played > 0 else 0
+                if quarter > 0:
+                    # הערכת הטוטאל הסופי לפי הרבע הנוכחי
+                    quarters_left = 4 - quarter
+                    estimated_final = current_total * (4 / quarter)
                     
-                    # חישוב צפי לסיום המשחק
-                    estimated_final_total = current_total + (points_per_minute * minutes_left)
-                    
-                    # עיגול לחצי נקודה הקרובה בהתאם לכללי הימורים
-                    lines_data['total'] = round(estimated_final_total * 2) / 2
+                    # הוספת 5% להערכה
+                    lines_data['total'] = round(estimated_final * 1.05, 1)
         except (ValueError, IndexError, TypeError, ZeroDivisionError):
             pass
+    
+    # חישוב טוטאל לפי ממוצע נקודות ליגה אם עדיין אין לנו
+    if not lines_data['total'] and 'league' in game:
+        league_name = game.get('league', {}).get('name', '').lower()
+        
+        # נתונים מבוססים על ממוצעי ליגות
+        league_average_points = {
+            'nba': 224.5,
+            'euroleague': 158.5,
+            'eurocup': 162.0,
+            'spain': 156.0,
+            'greece': 150.0,
+            'italy': 154.0,
+            'israel': 160.0,
+            'turkey': 158.0,
+            'lithuania': 152.0,
+            'germany': 158.0,
+            'france': 152.0,
+            'portugal': 150.0,
+            'qatar': 148.0
+        }
+        
+        # הגדרת ברירת מחדל אם אין ממוצע ספציפי לליגה
+        default_total = 155.0
+        
+        # חיפוש התאמה חלקית לשם הליגה
+        for league_key, avg_points in league_average_points.items():
+            if league_key in league_name:
+                lines_data['total'] = avg_points
+                break
+        
+        # אם לא נמצאה התאמה, השתמש בברירת המחדל
+        if not lines_data['total']:
+            lines_data['total'] = default_total
+    
+    # עיגול הערכים לחצי הקרוב (מקובל בהימורים)
+    if lines_data['spread']:
+        lines_data['spread'] = round(lines_data['spread'] * 2) / 2
+    
+    if lines_data['total']:
+        lines_data['total'] = round(lines_data['total'] * 2) / 2
     
     return lines_data
 
@@ -385,6 +435,7 @@ def calculate_opportunities(game_id, current_lines):
         'reason': opportunity_reason,
         'spread_diff': spread_diff,
         'total_diff': total_diff,
+        'time_status': current_lines.get('time_status'),
         'timestamp': datetime.now().isoformat()
     }
 
