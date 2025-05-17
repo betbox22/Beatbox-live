@@ -1,3 +1,79 @@
+# הוסף בראש הקובץ
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# בפונקציית get_games, החלף את app.logger ב-logger והוסף יותר לוגים:
+@app.route('/api/games')
+def get_games():
+    logger.info("התקבלה בקשה ל-API/games")
+    
+    # קריאה ל-API של B365 והחזרת נתונים
+    params = {
+        "sport_id": SPORT_ID,
+        "token": B365_TOKEN
+    }
+    
+    logger.info(f"מבצע קריאה ל-API של B365: {B365_API_URL} עם הפרמטרים: {params}")
+    
+    try:
+        response = requests.get(B365_API_URL, params=params, timeout=10)
+        logger.info(f"התקבלה תשובה מ-B365 עם סטטוס: {response.status_code}")
+        
+        if response.status_code != 200:
+            logger.error(f"שגיאה בקריאה ל-API: {response.status_code}, {response.text[:200]}")
+            return jsonify({"error": f"שגיאה בקריאה ל-API: {response.status_code}"}), 500
+            
+        games_data = response.json()
+        
+        if 'results' not in games_data:
+            logger.error(f"אין תוצאות ב-API: {str(games_data)[:200]}")
+            return jsonify({"error": "אין תוצאות מה-API", "data": games_data}), 200
+            
+        logger.info(f"התקבלו {len(games_data['results'])} משחקים מ-B365")
+        
+        # בדיקת הרשאות לקבצי היסטוריה
+        history_dir = os.path.dirname(LINES_HISTORY_FILE)
+        if not os.path.exists(history_dir):
+            try:
+                os.makedirs(history_dir)
+                logger.info(f"נוצרה תיקיית היסטוריה: {history_dir}")
+            except Exception as e:
+                logger.error(f"שגיאה ביצירת תיקיית היסטוריה: {str(e)}")
+                
+        # עיבוד נתוני משחקים ושמירת ליינים
+        for game in games_data['results']:
+            game_id = game.get('id')
+            if game_id:
+                try:
+                    # חילוץ נתוני ליין
+                    lines_data = extract_lines_from_game(game)
+                    
+                    # שמירת ליינים להיסטוריה
+                    data_changed = save_game_lines(game_id, lines_data)
+                    
+                    # חישוב הזדמנויות רק אם הנתונים השתנו
+                    if data_changed:
+                        opportunity = calculate_opportunities(game_id, lines_data)
+                        if opportunity and opportunity['type'] != 'neutral':
+                            save_opportunity(game_id, opportunity)
+                    
+                    # קבלת הזדמנות קיימת אם יש
+                    opportunity = get_opportunity(game_id)
+                    
+                    # הוספת מידע על הזדמנויות ונתוני ליין למשחק
+                    add_opportunity_and_lines_to_game(game, opportunity)
+                except Exception as e:
+                    logger.error(f"שגיאה בעיבוד משחק {game_id}: {str(e)}")
+        
+        logger.info("הסתיים עיבוד המשחקים בהצלחה")
+        return jsonify(games_data)
+    except requests.exceptions.Timeout:
+        logger.error("תם הזמן בקריאה ל-API של B365")
+        return jsonify({"error": "תם הזמן בקריאה ל-API"}), 504
+    except Exception as e:
+        logger.error(f"שגיאה כללית בקריאה ל-API: {str(e)}")
+        return jsonify({"error": f"שגיאה בקריאה ל-API: {str(e)}"}), 500
 # יבוא ספריות נדרשות
 from flask import Flask, jsonify, request, send_from_directory
 import requests
