@@ -1,3 +1,52 @@
+# בדיקות תקינות תצורה
+def validate_configuration():
+    issues = []
+    
+    # בדיקת API URL
+    if not B365_API_URL or not B365_API_URL.startswith("http"):
+        issues.append(f"כתובת API לא תקינה: {B365_API_URL}")
+    
+    # בדיקת טוקן
+    if not B365_TOKEN or len(B365_TOKEN) < 10:
+        issues.append(f"טוקן API לא תקין: {B365_TOKEN}")
+    
+    # בדיקת יכולת כתיבה לקבצי היסטוריה
+    storage_dir = get_storage_dir()
+    test_file = os.path.join(storage_dir, "test_write.txt")
+    try:
+        with open(test_file, 'w') as f:
+            f.write("test")
+        os.remove(test_file)
+    except Exception as e:
+        issues.append(f"בעיה בהרשאות כתיבה לתיקייה {storage_dir}: {str(e)}")
+    
+    if issues:
+        for issue in issues:
+            app.logger.error(f"בעיית תצורה: {issue}")
+        return False
+    return True
+
+# הפעלת בדיקת תצורה
+is_config_valid = validate_configuration()
+app.config['CONFIG_VALID'] = is_config_valid
+
+@app.route('/api/health')
+def health_check():
+    """בדיקת בריאות מערכת"""
+    # בדיקה פשוטה לB365 API
+    try:
+        response = requests.get(B365_API_URL, params={"token": B365_TOKEN, "sport_id": SPORT_ID}, timeout=5)
+        api_status = response.status_code == 200
+    except:
+        api_status = False
+    
+    return jsonify({
+        "status": "ok" if app.config['CONFIG_VALID'] and api_status else "error",
+        "config_valid": app.config['CONFIG_VALID'],
+        "api_available": api_status,
+        "environment": "production" if 'RENDER' in os.environ else "development",
+        "timestamp": datetime.now().isoformat()
+    })
 @app.route('/api/games')
 def get_games():
     # קריאה ל-API של B365 והחזרת נתונים
