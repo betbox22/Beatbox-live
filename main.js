@@ -1,4 +1,3 @@
-
 // main.js - קוד JavaScript עבור BETBOX
 
 // גלובליים
@@ -127,6 +126,9 @@ function filterGames() {
         // בדיקת ליגה
         if (leagueFilter !== 'all') {
             const league = game.league?.name || '';
+            if (!league.includes(le// בדיקת ליגה
+        if (leagueFilter !== 'all') {
+            const league = game.league?.name || '';
             if (!league.includes(leagueFilter)) return false;
         }
         
@@ -209,19 +211,39 @@ function showGameDetails(gameId) {
             if (data && data.results && data.results.length > 0) {
                 renderGameDetails(data.results[0]);
             } else {
-                modalContent.innerHTML = '<p>לא נמצאו נתונים למשחק זה</p>';
+                modalContent.innerHTML = `
+                    <span class="close">&times;</span>
+                    <h2>אין נתונים למשחק זה</h2>
+                    <p>לא ניתן לטעון את פרטי המשחק ברגע זה. נסה שוב מאוחר יותר.</p>
+                `;
+                
+                // הגדרת אירוע סגירת מודאל
+                document.querySelector('.close').addEventListener('click', function() {
+                    document.getElementById('game-details-modal').style.display = 'none';
+                });
             }
         })
         .catch(error => {
             console.error('שגיאה בטעינת פרטי משחק:', error);
-            modalContent.innerHTML = '<p>שגיאה בטעינת נתוני המשחק</p>';
+            modalContent.innerHTML = `
+                <span class="close">&times;</span>
+                <h2>שגיאה בטעינת נתוני המשחק</h2>
+                <p>אירעה שגיאה בעת טעינת פרטי המשחק. אנא נסה שוב מאוחר יותר.</p>
+            `;
+            
+            // הגדרת אירוע סגירת מודאל
+            document.querySelector('.close').addEventListener('click', function() {
+                document.getElementById('game-details-modal').style.display = 'none';
+            });
         });
         
     // בנוסף, טעינת היסטוריית ליינים
     fetch(`${API_BASE_URL}/game/${gameId}/lines_history`)
         .then(response => response.json())
         .then(history => {
-            renderLinesHistory(history);
+            if (history && history.length > 0) {
+                renderLinesHistory(history);
+            }
         })
         .catch(error => {
             console.error('שגיאה בטעינת היסטוריית ליינים:', error);
@@ -358,12 +380,62 @@ function formatGameTime(game) {
         const timer = game.timer || {};
         const quarter = timer.q || '';
         const time = timer.tm || '';
-        return `רבע ${quarter}<br><small>${time}</small>`;
+        
+        if (quarter && time) {
+            return `רבע ${quarter}<br><small>${time}</small>`;
+        } else if (game.extra && game.extra.current_quarter) {
+            // מקרה שהמידע נמצא בשדה extra
+            return `רבע ${game.extra.current_quarter}<br><small>${game.extra.remaining_time || ''}</small>`;
+        } else {
+            // אם אין מידע מדויק, נציג לפחות שזה משחק חי
+            return `משחק חי<br><small>${formatTimeSince(game.time)}</small>`;
+        }
     } else if (game.time_status === '0') {
-        // משחק עתידי
-        return formatTime(game.time);
+        // משחק עתידי - נציג את השעה המתוכננת
+        const gameDate = new Date(game.time * 1000);
+        const now = new Date();
+        
+        // אם המשחק היום, נציג רק שעה
+        if (isSameDay(gameDate, now)) {
+            return `היום<br><small>${formatTime(game.time)}</small>`;
+        } else {
+            // אחרת נציג תאריך ושעה
+            return `${formatShortDate(game.time)}<br><small>${formatTime(game.time)}</small>`;
+        }
+    } else if (game.time_status === '2') {
+        // משחק שהסתיים
+        return `הסתיים<br><small>${formatTimeSince(game.time)}</small>`;
     }
+    
     return '';
+}
+
+// פונקציות עזר נוספות
+function isSameDay(date1, date2) {
+    return date1.getDate() === date2.getDate() &&
+           date1.getMonth() === date2.getMonth() &&
+           date1.getFullYear() === date2.getFullYear();
+}
+
+function formatShortDate(timestamp) {
+    if (!timestamp) return '-';
+    const date = new Date(timestamp * 1000);
+    return date.toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit' });
+}
+
+function formatTimeSince(timestamp) {
+    if (!timestamp) return '';
+    const date = new Date(timestamp * 1000);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    
+    if (diffMins < 60) {
+        return `לפני ${diffMins} דק'`;
+    } else {
+        const diffHours = Math.floor(diffMins / 60);
+        return `לפני ${diffHours} שעות`;
+    }
 }
 
 function formatGameScore(game) {
