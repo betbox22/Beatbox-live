@@ -1,19 +1,37 @@
-// הוספת פונקציית דיבאג
-function debug(message, data) {
-    console.log(`[DEBUG] ${message}`, data);
-    // אפשר גם להציג בממשק אם רוצים
-    // document.getElementById('debug-info').innerText += `${message}\n`;
+// הוסף את זה בתחילת הקובץ main.js
+
+// פונקציית דיבאג מורחבת
+function debug(message, data = null) {
+    const now = new Date();
+    const timestamp = now.toLocaleTimeString('he-IL');
+    
+    if (data) {
+        console.log(`[${timestamp}] ${message}`, data);
+    } else {
+        console.log(`[${timestamp}] ${message}`);
+    }
+    
+    // אופציונלי: הוסף לוג על המסך
+    /*
+    const debugPanel = document.getElementById('debug-panel');
+    if (debugPanel) {
+        const logItem = document.createElement('div');
+        logItem.textContent = `[${timestamp}] ${message}`;
+        debugPanel.appendChild(logItem);
+        debugPanel.scrollTop = debugPanel.scrollHeight;
+    }
+    */
 }
 
+// מודיפיקציה לפונקציית loadGames
 async function loadGames() {
     try {
         showLoader(true);
         debug("מתחיל לטעון משחקים...");
         
-        // הוספת פרמטר למניעת מטמון
+        // הוספת חותמת זמן למניעת מטמון
         const timestamp = new Date().getTime();
         const response = await fetch(`${API_BASE_URL}/games?_t=${timestamp}`);
-        
         debug(`תגובה התקבלה מהשרת: ${response.status} ${response.statusText}`);
         
         if (!response.ok) {
@@ -31,8 +49,16 @@ async function loadGames() {
             return;
         }
         
-        const data = await response.json();
-        debug("התקבלו נתונים מהשרת", data);
+        let data;
+        try {
+            data = await response.json();
+            debug("התקבלו נתונים מהשרת", data);
+        } catch (e) {
+            debug("שגיאה בפענוח JSON", e);
+            document.getElementById('games-table-body').innerHTML = 
+                `<tr><td colspan="7">שגיאה בפענוח נתונים: ${e.message}</td></tr>`;
+            return;
+        }
         
         // בדיקה אם יש שגיאה מפורשת
         if (data.error) {
@@ -49,6 +75,12 @@ async function loadGames() {
                 `<tr><td colspan="7">${data.warning}</td></tr>`;
             return;
         }
+        
+        debug("בדיקת מבנה הנתונים", { 
+            hasResults: 'results' in data, 
+            resultsType: data.results ? typeof data.results : 'null',
+            resultsLength: data.results ? data.results.length : 0
+        });
         
         // בדיקה שיש תוצאות
         if (!data.results || !Array.isArray(data.results) || data.results.length === 0) {
@@ -69,13 +101,25 @@ async function loadGames() {
         
         debug(`${validGames} משחקים תקינים מתוך ${data.results.length}`);
         
+        // הגדרת currentGames שימנע חפצים ריקים
         currentGames = data.results.filter(game => game && game.id);
-        debug("משחקים לאחר סינון ראשוני", currentGames);
+        debug("משחקים לאחר סינון ראשוני", currentGames.length);
         
-        filterGames();
+        // ניסיון להציג את המשחקים
+        try {
+            filterGames();
+        } catch (e) {
+            debug("שגיאה בסינון וטעינת משחקים", e);
+            document.getElementById('games-table-body').innerHTML = 
+                `<tr><td colspan="7">שגיאה בעיבוד הנתונים: ${e.message}</td></tr>`;
+        }
         
+        // עדכון זמן עדכון אחרון
         lastUpdateTime = new Date();
-        document.getElementById('last-update-time').textContent = `עודכן לאחרונה: ${lastUpdateTime.toLocaleTimeString('he-IL')}`;
+        const lastUpdateElement = document.getElementById('last-update-time');
+        if (lastUpdateElement) {
+            lastUpdateElement.textContent = `עודכן לאחרונה: ${lastUpdateTime.toLocaleTimeString('he-IL')}`;
+        }
     } catch (error) {
         debug('שגיאה כללית בטעינת משחקים:', error);
         document.getElementById('games-table-body').innerHTML = 
@@ -85,65 +129,75 @@ async function loadGames() {
     }
 }
 
-function filterGames() {
-    debug(`סינון משחקים, מצב טאב: ${activeTab}, מספר משחקים: ${currentGames.length}`);
+// מודיפיקציה לרנדור המשחקים
+function renderGamesTable(games) {
+    debug(`מתחיל לרנדר טבלת משחקים עם ${games ? games.length : 0} משחקים`);
     
-    // בדיקה בסיסית לפני סינון
-    if (!currentGames || currentGames.length === 0) {
-        debug("אין משחקים לסינון");
-        document.getElementById('games-table-body').innerHTML = 
-            `<tr><td colspan="7">אין משחקים זמינים כרגע</td></tr>`;
+    const tableBody = document.getElementById('games-table-body');
+    
+    if (!tableBody) {
+        debug("לא נמצא אלמנט games-table-body בדף");
         return;
     }
     
-    const leagueFilter = document.getElementById('league-filter').value;
-    const opportunityFilter = document.getElementById('opportunity-filter').value;
-    const minLineMovement = parseFloat(document.getElementById('min-line-movement').value) || 0;
+    // ניקוי הטבלה
+    tableBody.innerHTML = '';
     
-    debug(`פילטרים: ליגה=${leagueFilter}, הזדמנות=${opportunityFilter}, תנועת-ליין=${minLineMovement}`);
-    
-    // סינון לפי מצב משחק (חי/עתידי)
-    let filteredGames = currentGames.filter(game => {
-        if (activeTab === 'live') {
-            return game.time_status === '1'; // משחק חי
-        } else if (activeTab === 'upcoming') {
-            return game.time_status === '0'; // משחק עתידי
-        }
-        return true; // הכל
-    });
-    
-    debug(`לאחר סינון סטטוס: ${filteredGames.length} משחקים`);
-    
-    // בדיקה אם הסינון הראשוני השאיר משחקים
-    if (filteredGames.length === 0) {
-        debug(`אין משחקים לאחר סינון סטטוס ${activeTab}`);
-        document.getElementById('games-table-body').innerHTML = 
-            `<tr><td colspan="7">אין משחקים ${activeTab === 'live' ? 'חיים' : (activeTab === 'upcoming' ? 'עתידיים' : '')} כרגע</td></tr>`;
+    // בדיקה אם יש משחקים
+    if (!games || games.length === 0) {
+        debug("אין משחקים להצגה");
+        tableBody.innerHTML = '<tr><td colspan="7">לא נמצאו משחקים</td></tr>';
         return;
     }
     
-    // סינון נוסף לפי הפילטרים
-    filteredGames = filteredGames.filter(game => {
-        // בדיקת ליגה
-        if (leagueFilter !== 'all') {
-            const league = game.league?.name || '';
-            if (!league.includes(leagueFilter)) return false;
+    debug(`מרנדר ${games.length} משחקים`);
+    
+    // רינדור כל משחק
+    games.forEach((game, index) => {
+        try {
+            debug(`מרנדר משחק ${index + 1}/${games.length}, ID: ${game.id}`);
+            
+            const row = document.createElement('tr');
+            
+            // צביעת רקע לפי סוג הזדמנות
+            if (game.opportunity_type === 'green') {
+                row.classList.add('highlight-green');
+            } else if (game.opportunity_type === 'red') {
+                row.classList.add('highlight-red');
+            }
+            
+            // הגדרת שורה לחיצה שתפתח את פרטי המשחק
+            row.classList.add('clickable');
+            row.addEventListener('click', () => showGameDetails(game.id));
+            
+            // בניית תאי הטבלה עם בדיקות null
+            row.innerHTML = `
+                <td>${game.league?.name || ''}</td>
+                <td>
+                    ${game.home?.name || 'בית'}<br>
+                    <small>${game.away?.name || 'חוץ'}</small>
+                </td>
+                <td>${formatGameTime(game)}</td>
+                <td>${formatGameScore(game)}</td>
+                <td class="${getDirectionClass(game.spread_direction || 'neutral')}">
+                    ${formatSpread(game.live_spread)}<br>
+                    <small>${formatDiff(game.live_spread_diff)}</small>
+                </td>
+                <td class="${getDirectionClass(game.total_direction || 'neutral')}">
+                    ${formatTotal(game.live_total)}<br>
+                    <small>${formatDiff(game.live_total_diff)}</small>
+                </td>
+                <td class="${game.opportunity_type || 'neutral'}">
+                    ${formatOpportunityType(game.opportunity_type)}<br>
+                    <small>${game.opportunity_reason || ''}</small>
+                </td>
+            `;
+            
+            tableBody.appendChild(row);
+        } catch (e) {
+            debug(`שגיאה ברינדור משחק ${index + 1}, ID: ${game?.id}:`, e);
         }
-        
-        // בדיקת סוג הזדמנות
-        if (opportunityFilter !== 'all') {
-            if (game.opportunity_type !== opportunityFilter) return false;
-        }
-        
-        // בדיקת מינימום תנועת ליין
-        const spreadDiff = Math.abs(game.live_spread_diff || 0);
-        const totalDiff = Math.abs(game.live_total_diff || 0);
-        if (spreadDiff < minLineMovement && totalDiff < minLineMovement) return false;
-        
-        return true;
     });
     
-    debug(`לאחר כל הסינונים: ${filteredGames.length} משחקים`);
-    
-    renderGamesTable(filteredGames);
+    debug("סיים רינדור טבלת משחקים");
 }
