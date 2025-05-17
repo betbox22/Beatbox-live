@@ -1,489 +1,374 @@
-// main.js - קוד JavaScript עבור BETBOX
-
-// גלובליים
-const API_BASE_URL = '/api';
-let refreshInterval = null;
-let lastUpdateTime = null;
-let activeTab = 'live';
-let currentStats = {};
-let currentGames = [];
-
-// אתחול האפליקציה כאשר המסמך נטען
-document.addEventListener('DOMContentLoaded', function() {
-    initApp();
-});
-
-function initApp() {
-    // אתחול אזור זמן נוכחי
-    updateCurrentTime();
-    setInterval(updateCurrentTime, 1000);
-    
-    // טעינת נתונים ראשונית
-    loadStats();
-    loadGames();
-    
-    // הגדרת אינטרוול עדכון כל 30 שניות
-    refreshInterval = setInterval(function() {
-        loadStats();
-        loadGames();
-    }, 30000);
-    
-    // הגדרת מאזינים לאירועים
-    document.getElementById('refresh-button').addEventListener('click', refreshData);
-    document.getElementById('league-filter').addEventListener('change', filterGames);
-    document.getElementById('opportunity-filter').addEventListener('change', filterGames);
-    document.getElementById('min-line-movement').addEventListener('input', filterGames);
-    
-    // הגדרת מאזינים לטאבים
-    const tabs = document.querySelectorAll('.tab');
-    tabs.forEach(tab => {
-        tab.addEventListener('click', function() {
-            activeTab = this.dataset.tab;
-            tabs.forEach(t => t.classList.remove('active'));
-            this.classList.add('active');
-            filterGames();
-        });
-    });
-    
-    // הגדרת מאזין לסגירת מודאל פרטי משחק
-    document.querySelector('.close').addEventListener('click', function() {
-        document.getElementById('game-details-modal').style.display = 'none';
-    });
-    
-    // סגירת מודאל בלחיצה מחוץ לתוכן
-    window.addEventListener('click', function(event) {
-        const modal = document.getElementById('game-details-modal');
-        if (event.target === modal) {
-            modal.style.display = 'none';
-        }
-    });
-}
-
-function updateCurrentTime() {
-    const now = new Date();
-    const timeString = now.toLocaleTimeString('he-IL');
-    document.getElementById('current-time').textContent = timeString;
-}
-
-async function loadStats() {
-    try {
-        showLoader(true);
-        const response = await fetch(`${API_BASE_URL}/stats`);
-        currentStats = await response.json();
-        updateStatsUI(currentStats);
-    } catch (error) {
-        console.error('שגיאה בטעינת סטטיסטיקות:', error);
-    } finally {
-        showLoader(false);
-    }
-}
-
-async function loadGames() {
-    try {
-        showLoader(true);
-        const response = await fetch(`${API_BASE_URL}/games`);
-        const data = await response.json();
-        
-        if (data && data.results) {
-            currentGames = data.results;
-            filterGames();
-            lastUpdateTime = new Date();
-            document.getElementById('last-update-time').textContent = `עודכן לאחרונה: ${lastUpdateTime.toLocaleTimeString('he-IL')}`;
-        }
-    } catch (error) {
-        console.error('שגיאה בטעינת משחקים:', error);
-    } finally {
-        showLoader(false);
-    }
-}
-
-function updateStatsUI(stats) {
-    document.getElementById('opportunity-percentage').textContent = `${stats.opportunity_percentage}%`;
-    document.getElementById('red-opportunities').textContent = stats.red_opportunities;
-    document.getElementById('green-opportunities').textContent = stats.green_opportunities;
-    document.getElementById('blue-opportunities').textContent = stats.blue_opportunities;
-    document.getElementById('total-live').textContent = stats.total_live;
-    document.getElementById('total-upcoming').textContent = stats.total_upcoming;
-}
-
-function filterGames() {
-    const leagueFilter = document.getElementById('league-filter').value;
-    const opportunityFilter = document.getElementById('opportunity-filter').value;
-    const minLineMovement = parseFloat(document.getElementById('min-line-movement').value) || 0;
-    
-    // סינון לפי מצב משחק (חי/עתידי)
-    let filteredGames = currentGames.filter(game => {
-        if (activeTab === 'live') {
-            return game.time_status === '1'; // משחק חי
-        } else if (activeTab === 'upcoming') {
-            return game.time_status === '0'; // משחק עתידי
-        }
-        return true; // הכל
-    });
-    
-    // סינון נוסף לפי הפילטרים
-    filteredGames = filteredGames.filter(game => {
-        // בדיקת ליגה
-        if (leagueFilter !== 'all') {
-            const league = game.league?.name || '';
-            if (!league.includes(leagueFilter)) return false;
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BETBOX - ניתוח משחקי כדורסל חיים</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --main-bg-color: #0a0a0a;
+            --secondary-bg-color: #181818;
+            --header-bg-color: #1c1c1c;
+            --border-color: #333;
+            --text-color: #e1e1e1;
+            --muted-text-color: #888;
+            --green-color: #4caf50;
+            --red-color: #f44336;
+            --blue-color: #2196f3;
+            --gold-color: #ffd700;
         }
         
-        // בדיקת סוג הזדמנות
-        if (opportunityFilter !== 'all') {
-            if (game.opportunity_type !== opportunityFilter) return false;
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
         
-        // בדיקת מינימום תנועת ליין
-        const spreadDiff = Math.abs(game.live_spread_diff || 0);
-        const totalDiff = Math.abs(game.live_total_diff || 0);
-        if (spreadDiff < minLineMovement && totalDiff < minLineMovement) return false;
-        
-        return true;
-    });
-    
-    renderGamesTable(filteredGames);
-}
-
-function renderGamesTable(games) {
-    const tableBody = document.getElementById('games-table-body');
-    tableBody.innerHTML = '';
-    
-    if (!games || games.length === 0) {
-        tableBody.innerHTML = '<tr><td colspan="10">לא נמצאו משחקים</td></tr>';
-        return;
-    }
-    
-    games.forEach(game => {
-        const row = document.createElement('tr');
-        
-        // צביעת רקע לפי סוג הזדמנות
-        if (game.opportunity_type === 'green') {
-            row.classList.add('highlight-green');
-        } else if (game.opportunity_type === 'red') {
-            row.classList.add('highlight-red');
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background-color: var(--main-bg-color);
+            color: var(--text-color);
+            direction: rtl;
         }
         
-        // הגדרת שורה לחיצה שתפתח את פרטי המשחק
-        row.classList.add('clickable');
-        row.addEventListener('click', () => showGameDetails(game.id));
+        header {
+            background-color: var(--header-bg-color);
+            padding: 15px 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
         
-        // בניית תאי הטבלה
-        row.innerHTML = `
-            <td>${game.league?.name || ''}</td>
-            <td>
-                ${game.home.name}<br>
-                <small>${game.away.name}</small>
-            </td>
-            <td>${formatGameTime(game)}</td>
-            <td>${formatGameScore(game)}</td>
-            <td class="${getDirectionClass(game.spread_direction)}">
-                ${formatSpread(game.live_spread)}<br>
-                <small>${formatDiff(game.live_spread_diff)}</small>
-            </td>
-            <td class="${getDirectionClass(game.total_direction)}">
-                ${formatTotal(game.live_total)}<br>
-                <small>${formatDiff(game.live_total_diff)}</small>
-            </td>
-            <td class="${game.opportunity_type}">
-                ${formatOpportunityType(game.opportunity_type)}<br>
-                <small>${game.opportunity_reason || ''}</small>
-            </td>
-        `;
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
         
-        tableBody.appendChild(row);
-    });
-}
-
-function showGameDetails(gameId) {
-    // הצגת לואדר במודאל
-    const modalContent = document.querySelector('.modal-content');
-    modalContent.innerHTML = '<div class="loader"></div>';
-    document.getElementById('game-details-modal').style.display = 'block';
-    
-    // קריאה לAPI לקבלת נתוני משחק מפורטים
-    fetch(`${API_BASE_URL}/game/${gameId}`)
-        .then(response => response.json())
-        .then(data => {
-            if (data && data.results && data.results.length > 0) {
-                renderGameDetails(data.results[0]);
-            } else {
-                modalContent.innerHTML = '<p>לא נמצאו נתונים למשחק זה</p>';
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .card {
+            background-color: var(--secondary-bg-color);
+            border-radius: 8px;
+            padding: 15px;
+            border: 1px solid var(--border-color);
+            text-align: center;
+        }
+        
+        .card-value {
+            font-size: 2rem;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        
+        .green { color: var(--green-color); }
+        .red { color: var(--red-color); }
+        .blue { color: var(--blue-color); }
+        .gold { color: var(--gold-color); }
+        
+        .filters {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 20px;
+            background-color: var(--secondary-bg-color);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+        
+        .filter-group {
+            display: flex;
+            align-items: center;
+            margin-left: 15px;
+        }
+        
+        select, input {
+            background-color: var(--main-bg-color);
+            color: var(--text-color);
+            border: 1px solid var(--border-color);
+            padding: 8px;
+            border-radius: 4px;
+            margin-right: 5px;
+        }
+        
+        button {
+            background-color: var(--blue-color);
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        .tabs {
+            display: flex;
+            margin-bottom: 15px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            background-color: var(--secondary-bg-color);
+            opacity: 0.7;
+            border: 1px solid var(--border-color);
+            border-bottom: none;
+            border-radius: 8px 8px 0 0;
+            margin-left: 5px;
+        }
+        
+        .tab.active {
+            opacity: 1;
+            border-bottom: 3px solid var(--blue-color);
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+            margin-bottom: 20px;
+        }
+        
+        th, td {
+            padding: 12px 15px;
+            text-align: center;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        thead th {
+            background-color: var(--header-bg-color);
+            position: sticky;
+            top: 60px;
+        }
+        
+        tr {
+            background-color: var(--secondary-bg-color);
+        }
+        
+        tr:hover {
+            background-color: #232323;
+        }
+        
+        .clickable {
+            cursor: pointer;
+        }
+        
+        .highlight-green {
+            background-color: rgba(76, 175, 80, 0.2);
+        }
+        
+        .highlight-red {
+            background-color: rgba(244, 67, 54, 0.2);
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+        }
+        
+        .modal-content {
+            background-color: var(--secondary-bg-color);
+            margin: 5% auto;
+            padding: 20px;
+            border: 1px solid var(--border-color);
+            width: 90%;
+            max-width: 800px;
+            border-radius: 8px;
+            position: relative;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .close {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            font-size: 24px;
+            cursor: pointer;
+        }
+        
+        .loader {
+            border: 5px solid rgba(255, 255, 255, 0.1);
+            border-top: 5px solid var(--blue-color);
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .footer {
+            margin-top: 30px;
+            text-align: center;
+            padding: 15px;
+            color: var(--muted-text-color);
+            border-top: 1px solid var(--border-color);
+        }
+        
+        .refresh-info {
+            display: flex;
+            justify-content
+            .refresh-info {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px;
+            background-color: var(--secondary-bg-color);
+            border-radius: 8px;
+            color: var(--muted-text-color);
+            margin-top: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            .dashboard {
+                grid-template-columns: 1fr 1fr;
             }
-        })
-        .catch(error => {
-            console.error('שגיאה בטעינת פרטי משחק:', error);
-            modalContent.innerHTML = '<p>שגיאה בטעינת נתוני המשחק</p>';
-        });
-        
-    // בנוסף, טעינת היסטוריית ליינים
-    fetch(`${API_BASE_URL}/game/${gameId}/lines_history`)
-        .then(response => response.json())
-        .then(history => {
-            renderLinesHistory(history);
-        })
-        .catch(error => {
-            console.error('שגיאה בטעינת היסטוריית ליינים:', error);
-        });
-}
-
-function renderGameDetails(game) {
-    const modalContent = document.querySelector('.modal-content');
+            
+            .filters {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .filter-group {
+                margin-bottom: 10px;
+            }
+            
+            th, td {
+                padding: 8px 10px;
+                font-size: 0.9rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>BETBOX - ניתוח משחקי כדורסל</h1>
+        <div id="current-time"></div>
+    </header>
     
-    // בניית HTML של פרטי המשחק
-    let gameDetails = `
-        <span class="close">&times;</span>
-        <h2>${game.league?.name}: ${game.home.name} vs ${game.away.name}</h2>
-        
-        <div class="game-info">
-            <div class="game-status">
-                <p>סטטוס: ${formatGameStatus(game.time_status)}</p>
-                <p>תאריך: ${formatDate(game.time)}</p>
-                <p>שעה: ${formatTime(game.time)}</p>
+    <div class="container">
+        <div class="dashboard">
+            <div class="card">
+                <div class="card-value green" id="opportunity-percentage">0%</div>
+                <div>אחוז הזדמנויות</div>
             </div>
-            
-            <div class="score-info">
-                <h3>תוצאה</h3>
-                <p>${game.home.name}: ${getHomeScore(game)}</p>
-                <p>${game.away.name}: ${getAwayScore(game)}</p>
+            <div class="card">
+                <div class="card-value red" id="red-opportunities">0</div>
+                <div>הזדמנויות כושלות</div>
             </div>
-            
-            <div class="line-info">
-                <h3>נתוני ליין</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th></th>
-                            <th>פתיחה</th>
-                            <th>התחלה</th>
-                            <th>נוכחי</th>
-                            <th>שינוי</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td>ספרד</td>
-                            <td>${formatSpread(game.opening_spread)}</td>
-                            <td>${formatSpread(game.start_spread)}</td>
-                            <td>${formatSpread(game.live_spread)}</td>
-                            <td class="${getDirectionClass(game.spread_direction)}">${formatDiff(game.live_spread_diff)}</td>
-                        </tr>
-                        <tr>
-                            <td>טוטאל</td>
-                            <td>${formatTotal(game.opening_total)}</td>
-                            <td>${formatTotal(game.start_total)}</td>
-                            <td>${formatTotal(game.live_total)}</td>
-                            <td class="${getDirectionClass(game.total_direction)}">${formatDiff(game.live_total_diff)}</td>
-                        </tr>
-                    </tbody>
-                </table>
+            <div class="card">
+                <div class="card-value green" id="green-opportunities">0</div>
+                <div>הזדמנויות ירוקות</div>
             </div>
-            
-            <div class="opportunity-info ${game.opportunity_type}">
-                <h3>הזדמנות</h3>
-                <p>סוג: ${formatOpportunityType(game.opportunity_type)}</p>
-                <p>סיבה: ${game.opportunity_reason || 'אין'}</p>
+            <div class="card">
+                <div class="card-value blue" id="blue-opportunities">0</div>
+                <div>הזדמנויות כחולות</div>
+            </div>
+            <div class="card">
+                <div class="card-value blue" id="total-live">0</div>
+                <div>משחקים חיים</div>
+            </div>
+            <div class="card">
+                <div class="card-value gold" id="total-upcoming">0</div>
+                <div>משחקים עתידיים</div>
             </div>
         </div>
         
-        <div id="lines-history-chart">
-            <!-- כאן ייטען גרף היסטוריית ליינים -->
+        <div class="filters">
+            <div class="filter-group">
+                <label>ליגה:</label>
+                <select id="league-filter">
+                    <option value="all">הכל</option>
+                    <option value="NBA">NBA</option>
+                    <option value="Euroleague">יורוליג</option>
+                    <option value="Spain">ספרד</option>
+                    <option value="Israel">ישראל</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>הזדמנויות:</label>
+                <select id="opportunity-filter">
+                    <option value="all">הכל</option>
+                    <option value="green">ירוקות</option>
+                    <option value="red">אדומות</option>
+                    <option value="blue">כחולות</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>תנועת ליין (מינימום):</label>
+                <input type="number" id="min-line-movement" min="0" step="0.5" value="0">
+            </div>
+            <button id="refresh-button"><i class="fas fa-sync-alt"></i> רענון</button>
         </div>
-    `;
-    
-    modalContent.innerHTML = gameDetails;
-    
-    // הגדרת אירוע סגירת מודאל
-    document.querySelector('.close').addEventListener('click', function() {
-        document.getElementById('game-details-modal').style.display = 'none';
-    });
-}
+        
+        <div class="tabs">
+            <div class="tab active" data-tab="live">משחקים חיים</div>
+            <div class="tab" data-tab="upcoming">משחקים עתידיים</div>
+            <div class="tab" data-tab="all">כל המשחקים</div>
+        </div>
 
-function renderLinesHistory(history) {
-    if (!history || history.length === 0) {
-        return;
-    }
-    
-    // יצירת נתונים מעובדים לגרף
-    const chartData = history.map(line => ({
-        timestamp: new Date(line.timestamp),
-        spread: line.spread,
-        total: line.total
-    }));
-    
-    // יצירת גרף פשוט
-    const historyContainer = document.getElementById('lines-history-chart');
-    historyContainer.innerHTML = `
-        <h3>היסטוריית ליינים</h3>
-        <table>
+        <div id="loader" class="loader hidden"></div>
+
+        <table id="games-table">
             <thead>
                 <tr>
-                    <th>זמן</th>
+                    <th>ליגה</th>
+                    <th>משחק</th>
+                    <th>זמן/רבע</th>
+                    <th>תוצאה</th>
                     <th>ספרד</th>
                     <th>טוטאל</th>
+                    <th>הזדמנות</th>
                 </tr>
             </thead>
-            <tbody>
-                ${chartData.map(data => `
-                    <tr>
-                        <td>${data.timestamp.toLocaleTimeString('he-IL')}</td>
-                        <td>${formatSpread(data.spread)}</td>
-                        <td>${formatTotal(data.total)}</td>
-                    </tr>
-                `).join('')}
+            <tbody id="games-table-body">
+                <tr>
+                    <td colspan="7">טוען נתונים...</td>
+                </tr>
             </tbody>
         </table>
-    `;
-}
 
-function refreshData() {
-    loadStats();
-    loadGames();
-}
+        <div class="refresh-info">
+            <div id="last-update-time">עודכן לאחרונה: --:--:--</div>
+            <div>רענון אוטומטי כל 30 שניות</div>
+        </div>
 
-function showLoader(show) {
-    const loader = document.getElementById('loader');
-    if (show) {
-        loader.classList.remove('hidden');
-    } else {
-        loader.classList.add('hidden');
-    }
-}
+        <div id="game-details-modal" class="modal">
+            <div class="modal-content">
+                <!-- תוכן דינמי יתווסף כאן -->
+            </div>
+        </div>
 
-// פונקציות עזר לפורמט
-function formatGameTime(game) {
-    if (game.time_status === '1') {
-        // משחק חי
-        const timer = game.timer || {};
-        const quarter = timer.q || '';
-        const time = timer.tm || '';
-        return `רבע ${quarter}<br><small>${time}</small>`;
-    } else if (game.time_status === '0') {
-        // משחק עתידי
-        return formatTime(game.time);
-    }
-    return '';
-}
-
-function formatGameScore(game) {
-    if (!game.ss) return '-';
-    
-    const scores = game.ss.split('-');
-    if (scores.length !== 2) return game.ss;
-    
-    const homeScore = scores[0];
-    const awayScore = scores[1];
-    
-    return `${homeScore}<br><small>${awayScore}</small>`;
-}
-
-function getHomeScore(game) {
-    if (!game.ss) return '-';
-    const scores = game.ss.split('-');
-    return scores[0] || '-';
-}
-
-function getAwayScore(game) {
-    if (!game.ss) return '-';
-    const scores = game.ss.split('-');
-    return scores.length > 1 ? scores[1] : '-';
-}
-
-function formatGameStatus(status) {
-    switch (status) {
-        case '0': return 'עתידי';
-        case '1': return 'משחק חי';
-        case '2': return 'הסתיים';
-        case '3': return 'נדחה';
-        case '4': return 'בוטל';
-        default: return 'לא ידוע';
-    }
-}
-
-function formatDate(timestamp) {
-    if (!timestamp) return '-';
-    const date = new Date(timestamp * 1000);
-    return date.toLocaleDateString('he-IL');
-}
-
-function formatTime(timestamp) {
-    if (!timestamp) return '-';
-    const date = new Date(timestamp * 1000);
-    return date.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
-}
-
-function formatSpread(spread) {
-    if (spread === null || spread === undefined) return '-';
-    return spread > 0 ? `+${spread.toFixed(1)}` : spread.toFixed(1);
-}
-
-function formatTotal(total) {
-    if (total === null || total === undefined) return '-';
-    return total.toFixed(1);
-}
-
-function formatDiff(diff) {
-    if (diff === null || diff === undefined) return '';
-    return diff > 0 ? `+${diff.toFixed(1)}` : diff.toFixed(1);
-}
-
-function formatOpportunityType(type) {
-    switch (type) {
-        case 'green': return 'ירוקה';
-        case 'red': return 'אדומה';
-        case 'blue': return 'כחולה';
-        default: return 'אין';
-    }
-}
-
-function getDirectionClass(direction) {
-    switch (direction) {
-        case 'up': return 'green';
-        case 'down': return 'red';
-        default: return '';
-    }
-}<!-- קטע להוסיף לקובץ HTML הקיים -->
-
-<div class="tabs">
-    <div class="tab active" data-tab="live">משחקים חיים</div>
-    <div class="tab" data-tab="upcoming">משחקים עתידיים</div>
-    <div class="tab" data-tab="all">כל המשחקים</div>
-</div>
-
-<div id="loader" class="loader hidden"></div>
-
-<table id="games-table">
-    <thead>
-        <tr>
-            <th>ליגה</th>
-            <th>משחק</th>
-            <th>זמן/רבע</th>
-            <th>תוצאה</th>
-            <th>ספרד</th>
-            <th>טוטאל</th>
-            <th>הזדמנות</th>
-        </tr>
-    </thead>
-    <tbody id="games-table-body">
-        <tr>
-            <td colspan="7">טוען נתונים...</td>
-        </tr>
-    </tbody>
-</table>
-
-<div class="refresh-info">
-    <div id="last-update-time">עודכן לאחרונה: --:--:--</div>
-    <div>רענון אוטומטי כל 30 שניות</div>
-</div>
-
-<div id="game-details-modal" class="modal">
-    <div class="modal-content">
-        <!-- תוכן דינמי יתווסף כאן -->
+        <div class="footer">
+            <p>BETBOX &copy; 2025 - ניתוח מתקדם למשחקי כדורסל חיים</p>
+        </div>
     </div>
-</div>
-
-<div class="footer">
-    <p>BETBOX &copy; 2025 - ניתוח מתקדם למשחקי כדורסל חיים</p>
-</div>
-
-<script src="main.js"></script>
+    
+    <script src="main.js"></script>
+</body>
+</html>
