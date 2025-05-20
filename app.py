@@ -91,3 +91,109 @@ def validate_configuration():
 
 # Run configuration validation
 is_config_valid = validate_configuration()
+# Function to save game lines history
+def save_game_lines(game_id, lines_data):
+    try:
+        # Check if parent directory exists
+        parent_dir = os.path.dirname(LINES_HISTORY_FILE)
+        if parent_dir and not os.path.exists(parent_dir):
+            os.makedirs(parent_dir, exist_ok=True)
+        
+        # Load existing history
+        history = {}
+        if os.path.exists(LINES_HISTORY_FILE):
+            try:
+                with open(LINES_HISTORY_FILE, 'r') as f:
+                    history = json.load(f)
+            except (json.JSONDecodeError, FileNotFoundError):
+                history = {}
+        
+        # Save new line data
+        if game_id not in history:
+            history[game_id] = []
+        
+        # Check if the data has changed since the last update
+        changed = True  # Default: assume change
+        
+        if history[game_id]:
+            last_entry = history[game_id][-1]
+            # Compare important values
+            changed = (
+                last_entry.get('spread') != lines_data.get('spread') or
+                last_entry.get('total') != lines_data.get('total') or
+                last_entry.get('time_status') != lines_data.get('time_status')
+            )
+        
+        if not changed:
+            return False
+        
+        # Add line data with timestamp
+        lines_data['timestamp'] = datetime.now().isoformat()
+        history[game_id].append(lines_data)
+        
+        # Save to file
+        with open(LINES_HISTORY_FILE, 'w') as f:
+            json.dump(history, f)
+        
+        return True
+    except Exception as e:
+        logger.error(f"Error saving line data: {str(e)}")
+        # If error, return True to continue processing
+        return True
+
+# Function to get game lines history
+def get_game_lines_history(game_id):
+    try:
+        if not os.path.exists(LINES_HISTORY_FILE):
+            return []
+        
+        with open(LINES_HISTORY_FILE, 'r') as f:
+            history = json.load(f)
+        
+        return history.get(game_id, [])
+    except (json.JSONDecodeError, FileNotFoundError, Exception) as e:
+        logger.error(f"Error reading lines history: {str(e)}")
+        return []
+
+# Function to save opportunities
+def save_opportunity(game_id, opportunity_data):
+    try:
+        # Check if parent directory exists
+        parent_dir = os.path.dirname(OPPORTUNITIES_FILE)
+        if parent_dir and not os.path.exists(parent_dir):
+            os.makedirs(parent_dir, exist_ok=True)
+        
+        # Load existing opportunities
+        opportunities = {}
+        if os.path.exists(OPPORTUNITIES_FILE):
+            try:
+                with open(OPPORTUNITIES_FILE, 'r') as f:
+                    opportunities = json.load(f)
+            except (json.JSONDecodeError, FileNotFoundError):
+                opportunities = {}
+        
+        # Save new opportunity data
+        opportunities[game_id] = opportunity_data
+        
+        # Save to file
+        with open(OPPORTUNITIES_FILE, 'w') as f:
+            json.dump(opportunities, f)
+        
+        return True
+    except Exception as e:
+        logger.error(f"Error saving opportunity data: {str(e)}")
+        return False
+
+# Function to get opportunity
+def get_opportunity(game_id):
+    try:
+        if not os.path.exists(OPPORTUNITIES_FILE):
+            return None
+        
+        with open(OPPORTUNITIES_FILE, 'r') as f:
+            opportunities = json.load(f)
+        
+        return opportunities.get(game_id, None)
+    except (json.JSONDecodeError, FileNotFoundError, Exception) as e:
+        logger.error(f"Error reading opportunity data: {str(e)}")
+        return None
