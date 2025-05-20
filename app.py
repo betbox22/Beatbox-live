@@ -765,4 +765,22 @@ def add_opportunity_and_lines_to_game(game, opportunity):
         game['opportunity_reason'] = ''
 
 # Handle static resources (JavaScript, CSS, images)
-@
+@# Handle static resources (JavaScript, CSS, images)
+@app.route('/<path:path>')
+def serve_static(path):
+    # If the file exists in the root, return it
+    if os.path.exists(path):
+        return send_from_directory('.', path)
+    # If the file doesn't exist, return 404
+    return app.send_static_file('index.html')
+
+# Handler for 404 errors
+@app.errorhandler(404)
+def not_found(e):
+    # Return the main page in case of 404 (useful for SPA)
+    return app.send_static_file('index.html')
+
+# Run the server in development environment
+if __name__ == '__main__':
+    # In production, the WSGI server will take care of running the application
+    app.run(debug=True, host='0.0.0.0')
