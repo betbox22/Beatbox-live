@@ -471,3 +471,242 @@ def add_opportunity_and_lines_to_game(game, opportunity):
         # Set default values
         game['opportunity_type'] = 'neutral'
         game['opportunity_reason'] = ''
+# עדכן את הנתיב הראשי שכבר קיים
+@app.route('/')
+def index():
+    # Return index.html from the root
+    return app.send_static_file('index.html')
+
+# החלף את /api/health שהיה קיים בגרסה המינימלית
+@app.route('/api/health')
+def health_check():
+    """System health check"""
+    # Basic check for B365 API
+    try:
+        response = requests.get(B365_API_URL, params={"token": B365_TOKEN, "sport_id": SPORT_ID}, timeout=5)
+        api_status = response.status_code == 200
+    except Exception as e:
+        logger.error(f"Error in API check: {str(e)}")
+        api_status = False
+    
+    return jsonify({
+        "status": "ok" if is_config_valid and api_status else "error",
+        "config_valid": is_config_valid,
+        "api_available": api_status,
+        "environment": "production" if 'RENDER' in os.environ else "development",
+        "timestamp": datetime.now().isoformat()
+    })
+
+# הוסף את שאר נקודות הקצה
+@app.route('/api/games')
+def get_games():
+    # Call the B365 API and return data
+    params = {
+        "sport_id": SPORT_ID,
+        "token": B365_TOKEN,
+        "_t": int(time.time())  # Prevent caching
+    }
+    
+    logger.info(f"Making API call to B365: {B365_API_URL}")
+    
+    try:
+        response = requests.get(B365_API_URL, params=params, timeout=15)
+        logger.info(f"Received response from B365 with status: {response.status_code}")
+        
+        if response.status_code != 200:
+            error_msg = f"Error calling API: status {response.status_code}"
+            logger.error(error_msg)
+            return jsonify({"error": error_msg, "details": response.text[:200]}), 500
+        
+        try:
+            games_data = response.json()
+        except Exception as e:
+            error_msg = f"Error parsing JSON: {str(e)}"
+            logger.error(error_msg)
+            return jsonify({"error": error_msg, "details": response.text[:200]}), 500
+        
+        # Check if there are results
+        if 'results' not in games_data or not games_data['results']:
+            logger.warning("No results from B365 API")
+            return jsonify({"warning": "No games available now", "raw_data": games_data}), 200
+        
+        # Count games by status
+        live_count = sum(1 for g in games_data['results'] if g.get('time_status') == '1')
+        upcoming_count = sum(1 for g in games_data['results'] if g.get('time_status') == '0')
+        
+        logger.info(f"Received {len(games_data['results'])} games, {live_count} live and {upcoming_count} upcoming")
+        
+        # Process game data and save lines
+        processed_games = 0
+        error_games = 0
+        
+        for game in games_data['results']:
+            game_id = game.get('id')
+            if not game_id:
+                logger.warning(f"Found game without ID")
+                continue
+                
+            try:
+                # Extract line data
+                lines_data = extract_lines_from_game(game)
+                
+                # Save lines to history
+                try:
+                    data_changed = save_game_lines(game_id, lines_data)
+                except Exception as e:
+                    logger.error(f"Error saving line data for game {game_id}: {str(e)}")
+                    data_changed = False
+                
+                # Calculate opportunities only if data changed
+                if data_changed:
+                    try:
+                        opportunity = calculate_opportunities(game_id, lines_data)
+                        if opportunity and opportunity['type'] != 'neutral':
+                            save_opportunity(game_id, opportunity)
+                    except Exception as e:
+                        logger.error(f"Error calculating opportunities for game {game_id}: {str(e)}")
+                
+                # Get existing opportunity if any
+                try:
+                    opportunity = get_opportunity(game_id)
+                except Exception as e:
+                    logger.error(f"Error reading opportunities for game {game_id}: {str(e)}")
+                    opportunity = None
+                
+                # Add information about opportunities and lines to the game
+                try:
+                    add_opportunity_and_lines_to_game(game, opportunity)
+                except Exception as e:
+                    logger.error(f"Error adding opportunity data to game {game_id}: {str(e)}")
+                
+                processed_games += 1
+            except Exception as e:
+                logger.error(f"General error processing game {game_id}: {str(e)}")
+                error_games += 1
+        
+        logger.info(f"Data processing completed: {processed_games} games processed successfully, {error_games} failed")
+        
+        # Add additional info to the response
+        response_data = games_data.copy()
+        response_data['_meta'] = {
+            'processed': processed_games,
+            'errors': error_games,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # Set cache control headers
+        response = jsonify(response_data)
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        
+        return response
+    except Exception as e:
+        error_msg = f"Error calling API: {str(e)}"
+        logger.error(error_msg)
+        return jsonify({"error": error_msg}), 500
+
+@app.route('/api/game/<game_id>')
+def get_game_details(game_id):
+    # Call the B365 API for a specific game
+    params = {
+        "event_id": game_id,
+        "token": B365_TOKEN
+    }
+    
+    try:
+        response = requests.get(B365_API_URL, params=params, timeout=15)
+        logger.info(f"Received response for game {game_id} with status: {response.status_code}")
+        
+        if response.status_code != 200:
+            error_msg = f"Error calling API for game {game_id}: status {response.status_code}"
+            logger.error(error_msg)
+            return jsonify({"error": error_msg}), 500
+        
+        try:
+            game_data = response.json()
+        except Exception as e:
+            error_msg = f"Error parsing JSON for game {game_id}: {str(e)}"
+            logger.error(error_msg)
+            return jsonify({"error": error_msg}), 500
+        
+        # Add additional info about lines and opportunities
+        if 'results' in game_data and game_data['results']:
+            game = game_data['results'][0]
+            
+            # Get existing opportunity if any
+            try:
+                opportunity = get_opportunity(game_id)
+            except Exception as e:
+                logger.error(f"Error reading opportunities for game {game_id}: {str(e)}")
+                opportunity = None
+            
+            # Add information about opportunities and lines to the game
+            try:
+                add_opportunity_and_lines_to_game(game, opportunity)
+            except Exception as e:
+                logger.error(f"Error adding opportunity data to game {game_id}: {str(e)}")
+        
+        return jsonify(game_data)
+    except Exception as e:
+        error_msg = f"Error reading game details {game_id}: {str(e)}"
+        logger.error(error_msg)
+        return jsonify({"error": error_msg}), 500
+
+@app.route('/api/game/<game_id>/lines_history')
+def get_lines_history(game_id):
+    try:
+        history = get_game_lines_history(game_id)
+        return jsonify(history)
+    except Exception as e:
+        logger.error(f"Error reading lines history for game {game_id}: {str(e)}")
+        return jsonify([])
+
+@app.route('/api/stats')
+def get_stats():
+    # Calculate statistics from opportunities
+    try:
+        opportunities = {}
+        if os.path.exists(OPPORTUNITIES_FILE):
+            try:
+                with open(OPPORTUNITIES_FILE, 'r') as f:
+                    opportunities = json.load(f)
+            except (json.JSONDecodeError, FileNotFoundError):
+                opportunities = {}
+        
+        # Count opportunities by type
+        green_opportunities = sum(1 for opp in opportunities.values() if opp and opp.get('type') == 'green')
+        red_opportunities = sum(1 for opp in opportunities.values() if opp and opp.get('type') == 'red')
+        blue_opportunities = sum(1 for opp in opportunities.values() if opp and opp.get('type') == 'blue')
+        
+        # Calculate opportunity percentage
+        total_opportunities = green_opportunities + red_opportunities + blue_opportunities
+        total_games = max(len(opportunities), 1)  # Prevent division by zero
+        opportunity_percentage = round((total_opportunities / total_games * 100) if total_games > 0 else 0)
+        
+        # Count live and upcoming games from real-time API data
+        total_live = 0
+        total_upcoming = 0
+        
+        try:
+            # Call the API to get current game data
+            params = {
+                "sport_id": SPORT_ID,
+                "token": B365_TOKEN
+            }
+            response = requests.get(B365_API_URL, params=params, timeout=10)
+            if response.status_code == 200:
+                games_data = response.json()
+                if 'results' in games_data:
+                    # Count games by status
+                    for game in games_data['results']:
+                        status = game.get('time_status')
+                        if status == '1':  # Live game
+                            total_live += 1
+                        elif status == '0':  # Upcoming game
+                            total_upcoming += 1
+        except Exception as e:
+            logger.error(f"Error counting games: {str(e)}")
+            # If error, show at least the number of games in our history
+            total_live = sum(1 for game_id, opps in opportunities.items() if opps.get('time_status') == '1')
+            total_upcoming = sum(1 for game_id, opps in opportunities.items
