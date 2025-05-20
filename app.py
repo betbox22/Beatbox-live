@@ -197,3 +197,198 @@ def get_opportunity(game_id):
     except (json.JSONDecodeError, FileNotFoundError, Exception) as e:
         logger.error(f"Error reading opportunity data: {str(e)}")
         return None
+# Function to extract line data from a game
+def extract_lines_from_game(game):
+    """
+    Extract line data from a game - adapt to B365 data structure
+    Returns an object with spread and total data
+    """
+    lines_data = {
+        'spread': None,
+        'total': None,
+        'time_status': game.get('time_status'),
+        'timestamp': datetime.now().isoformat(),
+        'quarter': None,
+        'time_remaining': None
+    }
+    
+    # Extract quarter and game clock info
+    if 'timer' in game:
+        timer = game.get('timer', {})
+        lines_data['quarter'] = timer.get('q')
+        lines_data['time_remaining'] = timer.get('tm')
+    
+    # Extract line data directly from odds if available
+    if 'odds' in game:
+        for market_type, market_data in game['odds'].items():
+            # Search for spread market in B365 format
+            if market_type in ['handicap', 'handicap_line', 'ah', 'point_spread']:
+                try:
+                    handicap_val = float(market_data)
+                    lines_data['spread'] = handicap_val
+                except (ValueError, TypeError):
+                    pass
+            
+            # Search for total market in B365 format
+            elif market_type in ['total', 'total_line', 'ou']:
+                try:
+                    total_val = float(market_data)
+                    lines_data['total'] = total_val
+                except (ValueError, TypeError):
+                    pass
+    
+    # Handle direct selection data from extra fields
+    if not lines_data['spread'] and 'extra' in game:
+        extra = game.get('extra', {})
+        if 'handicap' in extra:
+            try:
+                lines_data['spread'] = float(extra['handicap'])
+            except (ValueError, TypeError):
+                pass
+    
+    # Handle other odds formats
+    if not lines_data['spread'] and 'odds' in game:
+        for key, value in game['odds'].items():
+            if 'ah_home' in key or 'handicap_home' in key:
+                try:
+                    lines_data['spread'] = float(value)
+                    break
+                except (ValueError, TypeError):
+                    pass
+    
+    # Extract total from alternate formats
+    if not lines_data['total'] and 'odds' in game:
+        for key, value in game['odds'].items():
+            if 'total' in key.lower() and 'over' in key.lower():
+                try:
+                    lines_data['total'] = float(value)
+                    break
+                except (ValueError, TypeError):
+                    pass
+    
+    # Estimate from score if needed
+    if (not lines_data['spread'] or not lines_data['total']) and 'ss' in game:
+        try:
+            scores = game['ss'].split('-')
+            home_score = int(scores[0].strip())
+            away_score = int(scores[1].strip())
+            
+            # Calculate spread from score if needed
+            if not lines_data['spread']:
+                score_diff = home_score - away_score
+                if score_diff > 0:
+                    lines_data['spread'] = round(score_diff + 3.5, 1)
+                else:
+                    lines_data['spread'] = round(score_diff - 3.5, 1)
+            
+            # Calculate total from score and quarter if needed
+            if not lines_data['total']:
+                current_total = home_score + away_score
+                quarter = int(lines_data['quarter'] or 0)
+                
+                if quarter > 0:
+                    estimated_final = current_total * (4 / quarter)
+                    lines_data['total'] = round(estimated_final * 1.05, 1)
+        except (ValueError, IndexError, TypeError, ZeroDivisionError) as e:
+            logger.warning(f"Error calculating lines from score: {str(e)}")
+    
+    # Use league averages if needed
+    if not lines_data['total'] and 'league' in game:
+        league_name = game.get('league', {}).get('name', '').lower()
+        
+        # Default totals by league
+        league_average_points = {
+            'nba': 224.5,
+            'euroleague': 158.5,
+            'eurocup': 162.0,
+            'spain': 156.0,
+            'greece': 150.0,
+            'italy': 154.0,
+            'israel': 160.0,
+            'turkey': 158.0,
+            'lithuania': 152.0,
+            'germany': 158.0,
+            'france': 152.0,
+            'portugal': 150.0,
+            'qatar': 148.0
+        }
+        
+        default_total = 155.0
+        
+        # Match league
+        for league_key, avg_points in league_average_points.items():
+            if league_key in league_name:
+                lines_data['total'] = avg_points
+                break
+        
+        # Default if no match
+        if not lines_data['total']:
+            lines_data['total'] = default_total
+    
+    # Round to nearest half point
+    if lines_data['spread']:
+        lines_data['spread'] = round(lines_data['spread'] * 2) / 2
+    
+    if lines_data['total']:
+        lines_data['total'] = round(lines_data['total'] * 2) / 2
+    
+    return lines_data
+
+# Function to calculate opportunities
+def calculate_opportunities(game_id, current_lines):
+    try:
+        history = get_game_lines_history(game_id)
+        
+        if not history or len(history) < 2:
+            return None
+        
+        # Get opening line (first in history)
+        opening_lines = history[0]
+        
+        # Current
+        current_spread = current_lines.get('spread')
+        current_total = current_lines.get('total')
+        
+        # Opening
+        opening_spread = opening_lines.get('spread')
+        opening_total = opening_lines.get('total')
+        
+        # Calculate differences
+        spread_diff = 0
+        total_diff = 0
+        
+        if current_spread is not None and opening_spread is not None:
+            spread_diff = current_spread - opening_spread
+        
+        if current_total is not None and opening_total is not None:
+            total_diff = current_total - opening_total
+        
+        # Identify opportunities based on rules
+        opportunity_type = 'neutral'
+        opportunity_reason = ''
+        
+        if abs(spread_diff) >= 7:
+            opportunity_type = 'green'
+            opportunity_reason = f'Significant spread movement: {spread_diff:.1f} points'
+        elif abs(total_diff) >= 10:
+            opportunity_type = 'green'
+            opportunity_reason = f'Significant total movement: {total_diff:.1f} points'
+        
+        return {
+            'type': opportunity_type,
+            'reason': opportunity_reason,
+            'spread_diff': spread_diff,
+            'total_diff': total_diff,
+            'time_status': current_lines.get('time_status'),
+            'timestamp': datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error calculating opportunities for game {game_id}: {str(e)}")
+        return {
+            'type': 'neutral',
+            'reason': '',
+            'spread_diff': 0,
+            'total_diff': 0,
+            'time_status': current_lines.get('time_status'),
+            'timestamp': datetime.now().isoformat()
+        }
