@@ -392,3 +392,82 @@ def calculate_opportunities(game_id, current_lines):
             'time_status': current_lines.get('time_status'),
             'timestamp': datetime.now().isoformat()
         }
+# Function to add opportunity and line info to a game
+def add_opportunity_and_lines_to_game(game, opportunity):
+    try:
+        history = get_game_lines_history(game.get('id', ''))
+        
+        # Add line information
+        if history:
+            # Opening line (first in history)
+            opening_lines = history[0]
+            
+            # Start line (if available)
+            start_lines = history[1] if len(history) > 1 else opening_lines
+            
+            # Current line (last in history)
+            current_lines = history[-1]
+            
+            # Add line data to game
+            game['opening_spread'] = opening_lines.get('spread')
+            game['opening_total'] = opening_lines.get('total')
+            
+            game['start_spread'] = start_lines.get('spread')
+            game['start_total'] = start_lines.get('total')
+            
+            game['live_spread'] = current_lines.get('spread')
+            game['live_total'] = current_lines.get('total')
+            
+            # Calculate differences
+            if game['opening_spread'] is not None and game['live_spread'] is not None:
+                game['live_spread_diff'] = game['live_spread'] - game['opening_spread']
+            else:
+                game['live_spread_diff'] = 0
+                
+            if game['opening_total'] is not None and game['live_total'] is not None:
+                game['live_total_diff'] = game['live_total'] - game['opening_total']
+            else:
+                game['live_total_diff'] = 0
+                
+            # Set movement direction
+            game['spread_direction'] = 'up' if game.get('live_spread_diff', 0) > 0 else 'down' if game.get('live_spread_diff', 0) < 0 else 'neutral'
+            game['total_direction'] = 'up' if game.get('live_total_diff', 0) > 0 else 'down' if game.get('live_total_diff', 0) < 0 else 'neutral'
+            
+            # Mark significant changes
+            game['spread_flag'] = 'green' if abs(game.get('live_spread_diff', 0)) >= 7 else 'neutral'
+            game['ou_flag'] = 'green' if abs(game.get('live_total_diff', 0)) >= 10 else 'neutral'
+            
+            # Mark opening vs start
+            if game['opening_spread'] is not None and game['start_spread'] is not None:
+                opening_vs_start_spread = game['start_spread'] - game['opening_spread']
+                game['opening_vs_start'] = 'green' if abs(opening_vs_start_spread) >= 1 else 'neutral'
+            else:
+                game['opening_vs_start'] = 'neutral'
+        else:
+            # If no history, set default values
+            game['opening_spread'] = None
+            game['opening_total'] = None
+            game['start_spread'] = None
+            game['start_total'] = None
+            game['live_spread'] = None
+            game['live_total'] = None
+            game['live_spread_diff'] = 0
+            game['live_total_diff'] = 0
+            game['spread_direction'] = 'neutral'
+            game['total_direction'] = 'neutral'
+            game['spread_flag'] = 'neutral'
+            game['ou_flag'] = 'neutral'
+            game['opening_vs_start'] = 'neutral'
+        
+        # Add opportunity information
+        if opportunity:
+            game['opportunity_type'] = opportunity.get('type', 'neutral')
+            game['opportunity_reason'] = opportunity.get('reason', '')
+        else:
+            game['opportunity_type'] = 'neutral'
+            game['opportunity_reason'] = ''
+    except Exception as e:
+        logger.error(f"Error adding info to game: {str(e)}")
+        # Set default values
+        game['opportunity_type'] = 'neutral'
+        game['opportunity_reason'] = ''
