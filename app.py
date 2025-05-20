@@ -500,7 +500,7 @@ def get_games():
             return jsonify({"warning": "No games available now", "raw_data": games_data}), 200
         
         # Count games by status
-        live_count = sum(@app.route('/api/game/<game_id>/lines_history')
+       live_count = sum(@app.route('/api/game/<game_id>/lines
 def get_lines_history(game_id):
     try:
         history = get_game_lines_history(game_id)
