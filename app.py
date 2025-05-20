@@ -1,51 +1,26 @@
 # Import required libraries
 from flask import Flask, jsonify, request, send_from_directory
+import requests
 import os
+import json
 import time
+import tempfile
+from datetime import datetime
 import logging
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize Flask app
+# Initialize Flask app with static files in the root directory
 app = Flask(__name__, static_folder='.', static_url_path='')
 
 # API configuration
-API_TOKEN = "219761-iALwqep7Hy1aCl"
-
-@app.route('/')
-def index():
-    return app.send_static_file('index.html')
-
-@app.route('/api/health')
-def health_check():
-    """System health check"""
-    return jsonify({
-        "status": "ok",
-        "environment": "production" if 'RENDER' in os.environ else "development",
-        "timestamp": time.time()
-    })
-
-@app.route('/<path:path>')
-def static_file(path):
-    return send_from_directory('.', path)
-
-# Start the application when run directly
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
-# הוסף אחרי שורות הייבוא הקיימות
-import json
-import tempfile
-from datetime import datetime
-
-# API configuration - עדכן את זה במקום מה שכבר יש
 B365_TOKEN = "219761-iALwqep7Hy1aCl"
 B365_API_URL = "http://api.b365api.com/v3/events/inplay"
 SPORT_ID = 18  # Sport code for basketball
 
-# Function to get storage directory - הוסף אחרי הגדרות ה-API
+# Function to get storage directory
 def get_storage_dir():
     # Check if we're on Render server
     if 'RENDER' in os.environ:
@@ -91,6 +66,7 @@ def validate_configuration():
 
 # Run configuration validation
 is_config_valid = validate_configuration()
+
 # Function to save game lines history
 def save_game_lines(game_id, lines_data):
     try:
@@ -197,6 +173,7 @@ def get_opportunity(game_id):
     except (json.JSONDecodeError, FileNotFoundError, Exception) as e:
         logger.error(f"Error reading opportunity data: {str(e)}")
         return None
+
 # Function to extract line data from a game
 def extract_lines_from_game(game):
     """
@@ -237,7 +214,8 @@ def extract_lines_from_game(game):
                 except (ValueError, TypeError):
                     pass
     
-    # Handle direct selection data from extra fields
+    # Handle direct selection data based on first image
+    # where we see line +18.5 at odds 1.80
     if not lines_data['spread'] and 'extra' in game:
         extra = game.get('extra', {})
         if 'handicap' in extra:
@@ -246,8 +224,10 @@ def extract_lines_from_game(game):
             except (ValueError, TypeError):
                 pass
     
-    # Handle other odds formats
+    # Handle direct information from second image
+    # where we see lines like -3.5, -15.5, etc.
     if not lines_data['spread'] and 'odds' in game:
+        # Try to extract info in a different structure
         for key, value in game['odds'].items():
             if 'ah_home' in key or 'handicap_home' in key:
                 try:
@@ -256,7 +236,7 @@ def extract_lines_from_game(game):
                 except (ValueError, TypeError):
                     pass
     
-    # Extract total from alternate formats
+    # Extract total from second image
     if not lines_data['total'] and 'odds' in game:
         for key, value in game['odds'].items():
             if 'total' in key.lower() and 'over' in key.lower():
@@ -266,37 +246,44 @@ def extract_lines_from_game(game):
                 except (ValueError, TypeError):
                     pass
     
-    # Estimate from score if needed
+    # If we still don't have data, try to extract from the fields shown in the image
     if (not lines_data['spread'] or not lines_data['total']) and 'ss' in game:
         try:
+            # From image 1 we see current score is 52-38
             scores = game['ss'].split('-')
             home_score = int(scores[0].strip())
             away_score = int(scores[1].strip())
             
-            # Calculate spread from score if needed
+            # If we don't have spread, try to calculate based on current score
             if not lines_data['spread']:
                 score_diff = home_score - away_score
                 if score_diff > 0:
-                    lines_data['spread'] = round(score_diff + 3.5, 1)
+                    # Home team is leading, so give handicap to away team
+                    lines_data['spread'] = round(score_diff + 3.5, 1)  # Add safety margin
                 else:
-                    lines_data['spread'] = round(score_diff - 3.5, 1)
+                    # Away team is leading, give handicap to home team
+                    lines_data['spread'] = round(score_diff - 3.5, 1)  # Add safety margin
             
-            # Calculate total from score and quarter if needed
+            # If we don't have total, try to estimate based on score and quarter
             if not lines_data['total']:
                 current_total = home_score + away_score
                 quarter = int(lines_data['quarter'] or 0)
                 
                 if quarter > 0:
+                    # Estimate final total based on current quarter
+                    quarters_left = 4 - quarter
                     estimated_final = current_total * (4 / quarter)
+                    
+                    # Add 5% to estimate
                     lines_data['total'] = round(estimated_final * 1.05, 1)
         except (ValueError, IndexError, TypeError, ZeroDivisionError) as e:
             logger.warning(f"Error calculating lines from score: {str(e)}")
     
-    # Use league averages if needed
+    # Calculate total based on league average points if we still don't have it
     if not lines_data['total'] and 'league' in game:
         league_name = game.get('league', {}).get('name', '').lower()
         
-        # Default totals by league
+        # Data based on league averages
         league_average_points = {
             'nba': 224.5,
             'euroleague': 158.5,
@@ -313,19 +300,20 @@ def extract_lines_from_game(game):
             'qatar': 148.0
         }
         
+        # Default if no specific league average
         default_total = 155.0
         
-        # Match league
+        # Search for partial match to league name
         for league_key, avg_points in league_average_points.items():
             if league_key in league_name:
                 lines_data['total'] = avg_points
                 break
         
-        # Default if no match
+        # If no match found, use default
         if not lines_data['total']:
             lines_data['total'] = default_total
     
-    # Round to nearest half point
+    # Round values to nearest half (common in betting)
     if lines_data['spread']:
         lines_data['spread'] = round(lines_data['spread'] * 2) / 2
     
@@ -392,6 +380,7 @@ def calculate_opportunities(game_id, current_lines):
             'time_status': current_lines.get('time_status'),
             'timestamp': datetime.now().isoformat()
         }
+
 # Function to add opportunity and line info to a game
 def add_opportunity_and_lines_to_game(game, opportunity):
     try:
@@ -471,7 +460,177 @@ def add_opportunity_and_lines_to_game(game, opportunity):
         # Set default values
         game['opportunity_type'] = 'neutral'
         game['opportunity_reason'] = ''
-# המשך מהחלק הקודם שכבר הוספת
+
+# API Routes
+@app.route('/')
+def index():
+    # Return index.html from the root
+    return app.send_static_file('index.html')
+
+@app.route('/api/games')
+def get_games():
+    # Call the B365 API and return data
+    params = {
+        "sport_id": SPORT_ID,
+        "token": B365_TOKEN,
+        "_t": int(time.time())  # Prevent caching
+    }
+    
+    logger.info(f"Making API call to B365: {B365_API_URL}")
+    
+    try:
+        response = requests.get(B365_API_URL, params=params, timeout=15)
+        logger.info(f"Received response from B365 with status: {response.status_code}")
+        
+        if response.status_code != 200:
+            error_msg = f"Error calling API: status {response.status_code}"
+            logger.error(error_msg)
+            return jsonify({"error": error_msg, "details": response.text[:200]}), 500
+        
+        try:
+            games_data = response.json()
+        except Exception as e:
+            error_msg = f"Error parsing JSON: {str(e)}"
+            logger.error(error_msg)
+            return jsonify({"error": error_msg, "details": response.text[:200]}), 500
+        
+        # Check if there are results
+        if 'results' not in games_data or not games_data['results']:
+            logger.warning("No results from B365 API")
+            return jsonify({"warning": "No games available now", "raw_data": games_data}), 200
+        
+        # Count games by status
+        live_count = sum(1 for g in games_data['results'] if g.get('time_status') == '1')
+        upcoming_count = sum(1 for g in games_data['results'] if g.get('time_status') == '0')
+        
+        logger.info(f"Received {len(games_data['results'])} games, {live_count} live and {upcoming_count} upcoming")
+        
+        # Process game data and save lines
+        processed_games = 0
+        error_games = 0
+        
+        for game in games_data['results']:
+            game_id = game.get('id')
+            if not game_id:
+                logger.warning(f"Found game without ID")
+                continue
+                
+            try:
+                # Extract line data
+                lines_data = extract_lines_from_game(game)
+                
+                # Save lines to history
+                try:
+                    data_changed = save_game_lines(game_id, lines_data)
+                except Exception as e:
+                    logger.error(f"Error saving line data for game {game_id}: {str(e)}")
+                    data_changed = False
+                
+                # Calculate opportunities only if data changed
+                if data_changed:
+                    try:
+                        opportunity = calculate_opportunities(game_id, lines_data)
+                        if opportunity and opportunity['type'] != 'neutral':
+                            save_opportunity(game_id, opportunity)
+                    except Exception as e:
+                        logger.error(f"Error calculating opportunities for game {game_id}: {str(e)}")
+                
+                # Get existing opportunity if any
+                try:
+                    opportunity = get_opportunity(game_id)
+                except Exception as e:
+                    logger.error(f"Error reading opportunities for game {game_id}: {str(e)}")
+                    opportunity = None
+                
+                # Add information about opportunities and lines to the game
+                try:
+                    add_opportunity_and_lines_to_game(game, opportunity)
+                except Exception as e:
+                    logger.error(f"Error adding opportunity data to game {game_id}: {str(e)}")
+                
+                processed_games += 1
+            except Exception as e:
+                logger.error(f"General error processing game {game_id}: {str(e)}")
+                error_games += 1
+        
+        logger.info(f"Data processing completed: {processed_games} games processed successfully, {error_games} failed")
+        
+        # Add additional info to the response
+        response_data = games_data.copy()
+        response_data['_meta'] = {
+            'processed': processed_games,
+            'errors': error_games,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # Set cache control headers
+        response = jsonify(response_data)
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        
+        return response
+    except Exception as e:
+        error_msg = f"Error calling API: {str(e)}"
+        logger.error(error_msg)
+        return jsonify({"error": error_msg}), 500
+
+@app.route('/api/game/<game_id>')
+def get_game_details(game_id):
+    # Call the B365 API for a specific game
+    params = {
+        "event_id": game_id,
+        "token": B365_TOKEN
+    }
+    
+    try:
+        response = requests.get(B365_API_URL, params=params, timeout=15)
+        logger.info(f"Received response for game {game_id} with status: {response.status_code}")
+        
+        if response.status_code != 200:
+            error_msg = f"Error calling API for game {game_id}: status {response.status_code}"
+            logger.error(error_msg)
+            return jsonify({"error": error_msg}), 500
+        
+        try:
+            game_data = response.json()
+        except Exception as e:
+            error_msg = f"Error parsing JSON for game {game_id}: {str(e)}"
+            logger.error(error_msg)
+            return jsonify({"error": error_msg}), 500
+        
+        # Add additional info about lines and opportunities
+        if 'results' in game_data and game_data['results']:
+            game = game_data['results'][0]
+            
+            # Get existing opportunity if any
+            try:
+                opportunity = get_opportunity(game_id)
+            except Exception as e:
+                logger.error(f"Error reading opportunities for game {game_id}: {str(e)}")
+                opportunity = None
+            
+            # Add information about opportunities and lines to the game
+            try:
+                add_opportunity_and_lines_to_game(game, opportunity)
+            except Exception as e:
+                logger.error(f"Error adding opportunity data to game {game_id}: {str(e)}")
+        
+        return jsonify(game_data)
+    except Exception as e:
+        error_msg = f"Error reading game details {game_id}: {str(e)}"
+        logger.error(error_msg)
+        return jsonify({"error": error_msg}), 500
+
+@app.route('/api/game/<game_id>/lines_history')
+def get_lines_history(game_id):
+    try:
+        history = get_game_lines_history(game_id)
+        return jsonify(history)
+    except Exception as e:
+        logger.error(f"Error reading lines history for game {game_id}: {str(e)}")
+        return jsonify([])
+
 @app.route('/api/stats')
 def get_stats():
     # Calculate statistics from opportunities
@@ -542,57 +701,13 @@ def get_stats():
             "total_upcoming": 0
         })
 
-@app.route('/api/check-b365')
-def check_b365():
-    """Manual check of B365 API"""
+@app.route('/api/health')
+def health_check():
+    """System health check"""
+    # Basic check for B365 API
     try:
-        logger.info("Starting manual check of B365 API")
-        response = requests.get(B365_API_URL, params={"token": B365_TOKEN, "sport_id": SPORT_ID}, timeout=10)
-        
-        logger.info(f"Received response with status: {response.status_code}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            
-            if 'results' in data and data['results']:
-                live_count = sum(1 for g in data['results'] if g.get('time_status') == '1')
-                upcoming_count = sum(1 for g in data['results'] if g.get('time_status') == '0')
-                
-                return jsonify({
-                    "status": "ok",
-                    "total_games": len(data['results']),
-                    "live_games": live_count,
-                    "upcoming_games": upcoming_count,
-                    "first_game_sample": data['results'][0] if data['results'] else None,
-                    "timestamp": datetime.now().isoformat()
-                })
-            else:
-                return jsonify({
-                    "status": "no_games",
-                    "message": "API connection successful but no games found",
-                    "raw_response": data,
-                    "timestamp": datetime.now().isoformat()
-                })
-        else:
-            return jsonify({
-                "status": "error",
-                "message": f"Error connecting to API: {response.status_code}",
-                "response_text": response.text[:500],
-                "timestamp": datetime.now().isoformat()
-            }), 500
+        response = requests.get(B365_API_URL, params={"token": B365_TOKEN, "sport_id": SPORT_ID}, timeout=5)
+        api_status = response.status_code == 200
     except Exception as e:
-        return jsonify({
-            "status": "error",
-            "message": f"Error in check: {str(e)}",
-            "timestamp": datetime.now().isoformat()
-        }), 500
-
-# שים לב אם כבר יש לך נתיב דומה, החלף אותו במקום להוסיף
-@app.route('/<path:path>')
-def static_file(path):
-    return send_from_directory('.', path)
-
-# אם כבר יש לך את החלק הזה, אל תוסיף שוב
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+        logger.error(f"Error in API check: {str(e)}")
+        api_status = False
