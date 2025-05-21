@@ -4,369 +4,120 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BETBOX - ניתוח משחקי כדורסל חיים</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <style>
-        :root {
-            --main-bg-color: #0a0a0a;
-            --secondary-bg-color: #181818;
-            --header-bg-color: #1c1c1c;
-            --border-color: #333;
-            --text-color: #e1e1e1;
-            --muted-text-color: #888;
-            --green-color: #4caf50;
-            --red-color: #f44336;
-            --blue-color: #2196f3;
-            --gold-color: #ffd700;
-        }
-        
-        * {
+        /* סגנונות בסיסיים להדגמה - כדאי להעביר לקובץ CSS נפרד */
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
             margin: 0;
             padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background-color: var(--main-bg-color);
-            color: var(--text-color);
             direction: rtl;
         }
         
-        header {
-            background-color: var(--header-bg-color);
-            padding: 15px 20px;
-            border-bottom: 1px solid var(--border-color);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            position: sticky;
-            top: 0;
-            z-index: 100;
-        }
-        
         .container {
-            max-width: 1400px;
+            max-width: 1200px;
             margin: 0 auto;
             padding: 20px;
         }
         
-        .dashboard {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-        
-        .card {
-            background-color: var(--secondary-bg-color);
-            border-radius: 8px;
-            padding: 15px;
-            border: 1px solid var(--border-color);
+        header {
+            background-color: #222;
+            color: white;
+            padding: 15px 0;
             text-align: center;
         }
         
-        .card-value {
-            font-size: 2rem;
+        .header-title {
+            font-size: 24px;
             font-weight: bold;
-            margin: 10px 0;
+            margin: 0;
         }
         
-        .green { color: var(--green-color); }
-        .red { color: var(--red-color); }
-        .blue { color: var(--blue-color); }
-        .gold { color: var(--gold-color); }
-        
-        .filters {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin-bottom: 20px;
-            background-color: var(--secondary-bg-color);
-            padding: 15px;
-            border-radius: 8px;
-            border: 1px solid var(--border-color);
-        }
-        
-        .filter-group {
-            display: flex;
-            align-items: center;
-            margin-left: 15px;
-        }
-        
-        select, input {
-            background-color: var(--main-bg-color);
-            color: var(--text-color);
-            border: 1px solid var(--border-color);
-            padding: 8px;
-            border-radius: 4px;
-            margin-right: 5px;
-        }
-        
-        button {
-            background-color: var(--blue-color);
+        .refresh-button {
+            background-color: #4CAF50;
             color: white;
             border: none;
             padding: 8px 15px;
             border-radius: 4px;
             cursor: pointer;
-        }
-        
-        .tabs {
+            margin-top: 10px;
             display: flex;
-            margin-bottom: 15px;
-            border-bottom: 1px solid var(--border-color);
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
         }
         
-        .tab {
-            padding: 10px 20px;
-            cursor: pointer;
-            background-color: var(--secondary-bg-color);
-            opacity: 0.7;
-            border: 1px solid var(--border-color);
-            border-bottom: none;
-            border-radius: 8px 8px 0 0;
-            margin-left: 5px;
+        .league-header {
+            background-color: #333;
+            color: white;
+            padding: 10px 15px;
+            margin-top: 20px;
+            border-radius: 4px 4px 0 0;
+            font-weight: bold;
         }
         
-        .tab.active {
-            opacity: 1;
-            border-bottom: 3px solid var(--blue-color);
-        }
-        
-        table {
-            width: 100%;
-            border-collapse: separate;
-            border-spacing: 0;
+        .league-games {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 15px;
             margin-bottom: 20px;
-        }
-        
-        th, td {
-            padding: 12px 15px;
-            text-align: center;
-            border-bottom: 1px solid var(--border-color);
-        }
-        
-        thead th {
-            background-color: var(--header-bg-color);
-            position: sticky;
-            top: 60px;
-        }
-        
-        tr {
-            background-color: var(--secondary-bg-color);
-        }
-        
-        tr:hover {
-            background-color: #232323;
-        }
-        
-        .clickable {
-            cursor: pointer;
-        }
-        
-        .highlight-green {
-            background-color: rgba(76, 175, 80, 0.2);
-        }
-        
-        .highlight-red {
-            background-color: rgba(244, 67, 54, 0.2);
-        }
-        
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.7);
-            z-index: 1000;
-        }
-        
-        .modal-content {
-            background-color: var(--secondary-bg-color);
-            margin: 5% auto;
-            padding: 20px;
-            border: 1px solid var(--border-color);
-            width: 90%;
-            max-width: 800px;
-            border-radius: 8px;
-            position: relative;
-            max-height: 80vh;
-            overflow-y: auto;
-        }
-        
-        .close {
-            position: absolute;
-            top: 10px;
-            right: 15px;
-            font-size: 24px;
-            cursor: pointer;
-        }
-        
-        .loader {
-            border: 5px solid rgba(255, 255, 255, 0.1);
-            border-top: 5px solid var(--blue-color);
-            border-radius: 50%;
-            width: 50px;
-            height: 50px;
-            animation: spin 1s linear infinite;
-            margin: 20px auto;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        
-        .hidden {
-            display: none;
-        }
-        
-        .footer {
-            margin-top: 30px;
-            text-align: center;
             padding: 15px;
-            color: var(--muted-text-color);
-            border-top: 1px solid var(--border-color);
+            background-color: #f9f9f9;
+            border-radius: 0 0 4px 4px;
         }
         
-        .refresh-info {
+        .game-card {
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            padding: 15px;
+            position: relative;
+        }
+        
+        .opportunity-positive {
+            border-right: 5px solid #4CAF50;
+        }
+        
+        .opportunity-negative {
+            border-right: 5px solid #f44336;
+        }
+        
+        .game-header {
             display: flex;
             justify-content: space-between;
-            padding: 10px;
-            background-color: var(--secondary-bg-color);
-            border-radius: 8px;
-            color: var(--muted-text-color);
-            margin-top: 20px;
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eee;
         }
         
-        @media (max-width: 768px) {
-            .dashboard {
-                grid-template-columns: 1fr 1fr;
-            }
-            
-            .filters {
-                flex-direction: column;
-                align-items: flex-start;
-            }
-            
-            .filter-group {
-                margin-bottom: 10px;
-            }
-            
-            th, td {
-                padding: 8px 10px;
-                font-size: 0.9rem;
-            }
+        .teams-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 15px;
         }
-    </style>
-</head>
-<body>
-    <header>
-        <h1>BETBOX - ניתוח משחקי כדורסל</h1>
-        <div id="current-time"></div>
-    </header>
-    
-    <div class="container">
-        <div class="dashboard">
-            <div class="card">
-                <div class="card-value green" id="opportunity-percentage">0%</div>
-                <div>אחוז הזדמנויות</div>
-            </div>
-            <div class="card">
-                <div class="card-value red" id="red-opportunities">0</div>
-                <div>הזדמנויות כושלות</div>
-            </div>
-            <div class="card">
-                <div class="card-value green" id="green-opportunities">0</div>
-                <div>הזדמנויות ירוקות</div>
-            </div>
-            <div class="card">
-                <div class="card-value blue" id="blue-opportunities">0</div>
-                <div>הזדמנויות כחולות</div>
-            </div>
-            <div class="card">
-                <div class="card-value blue" id="total-live">0</div>
-                <div>משחקים חיים</div>
-            </div>
-            <div class="card">
-                <div class="card-value gold" id="total-upcoming">0</div>
-                <div>משחקים עתידיים</div>
-            </div>
-        </div>
         
-        <div class="filters">
-            <div class="filter-group">
-                <label>ליגה:</label>
-                <select id="league-filter">
-                    <option value="all">הכל</option>
-                    <option value="NBA">NBA</option>
-                    <option value="Euroleague">יורוליג</option>
-                    <option value="Spain">ספרד</option>
-                    <option value="Israel">ישראל</option>
-                </select>
-            </div>
-            <div class="filter-group">
-                <label>הזדמנויות:</label>
-                <select id="opportunity-filter">
-                    <option value="all">הכל</option>
-                    <option value="green">ירוקות</option>
-                    <option value="red">אדומות</option>
-                    <option value="blue">כחולות</option>
-                </select>
-            </div>
-            <div class="filter-group">
-                <label>תנועת ליין (מינימום):</label>
-                <input type="number" id="min-line-movement" min="0" step="0.5" value="0">
-            </div>
-            <button id="refresh-button"><i class="fas fa-sync-alt"></i> רענון</button>
-        </div>
+        .team {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            flex: 1;
+        }
         
-        <div class="tabs">
-            <div class="tab active" data-tab="live">משחקים חיים</div>
-            <div class="tab" data-tab="upcoming">משחקים עתידיים</div>
-            <div class="tab" data-tab="all">כל המשחקים</div>
-        </div>
-
-        <div id="loader" class="loader hidden"></div>
-
-        <table id="games-table">
-            <thead>
-                <tr>
-                    <th>ליגה</th>
-                    <th>משחק</th>
-                    <th>זמן/רבע</th>
-                    <th>תוצאה</th>
-                    <th>ספרד</th>
-                    <th>טוטאל</th>
-                    <th>הזדמנות</th>
-                </tr>
-            </thead>
-            <tbody id="games-table-body">
-                <tr>
-                    <td colspan="7">טוען נתונים...</td>
-                </tr>
-            </tbody>
-        </table>
-
-        <div class="refresh-info">
-            <div id="last-update-time">עודכן לאחרונה: --:--:--</div>
-            <div>רענון אוטומטי כל 30 שניות</div>
-        </div>
-
-        <div id="game-details-modal" class="modal">
-            <div class="modal-content">
-                <span class="close">&times;</span>
-                <div id="game-details-content"></div>
-            </div>
-        </div>
-
-        <div class="footer">
-            <p>BETBOX &copy; 2025 - ניתוח מתקדם למשחקי כדורסל חיים</p>
-        </div>
-    </div>
-    
-    <script src="main.js"></script>
-</body>
-</html>
+        .team-name {
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 5px;
+        }
+        
+        .team-score {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .team-spread {
+            color: #666;
+            font-size
